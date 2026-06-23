@@ -1,0 +1,389 @@
+// Cypher — data model (source of truth)
+// Stack: Next.js 15 + Prisma + PostgreSQL (Neon/Supabase) on Vercel.
+// CORE CONCEPT: a Channel is a "room" with a join CODE. A host creates it; whoever enters
+// with the code joins as a member and can upload tracks. Host moderates. Crowd votes. Battles decide.
+// Voting: guest-allowed (fingerprint + IP cap + Turnstile captcha). See docs/plan 1.md §1b, §4, §6.
+//
+// Conventions:
+//  - Tables snake_case plural via @@map; columns snake_case via @map.
+//  - PK id = UUID. FK = {table_singular}_id.
+//  - ip_hash / fingerprint_hash = HMAC(server_secret, value). NEVER raw IP/PII.
+//  - Vote uniqueness is enforced by the DB UNIQUE on Vote.dedupeKey (final guard), not app code.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // for migrations behind a serverless pooler (Neon/Supabase)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Role {
+  USER
+  ADMIN // platform admin (site-wide). Channel-level roles live on ChannelMember.
+}
+
+enum MemberRole {
+  HOST      // creator / admin of the room
+  MODERATOR // can help review submissions
+  MEMBER    // joined via code, can upload + vote
+}
+
+enum ChannelVisibility {
+  PUBLIC   // listed on /explore
+  UNLISTED // code-only, not listed
+}
+
+enum ChannelStatus {
+  DRAFT
+  OPEN              // submissions open (artists drop tracks)
+  SUBMISSIONS_CLOSED
+  VOTING_OPEN
+  VOTING_CLOSED
+  RESULTS
+  BATTLE
+  COMPLETED
+}
+
+enum ResultsVisibility {
+  LIVE        // live counts visible to everyone
+  HIDDEN      // host-only
+  AFTER_CLOSE // revealed when voting closes
+}
+
+enum VoteScope {
+  PER_SUBMISSION  // one vote per track per voter
+  PER_COMPETITION // one vote total per voter (pick a favorite)
+}
+
+enum SourceType {
+  FILE_MP3
+  FILE_WAV
+  SOUNDCLOUD
+  SPOTIFY
+  OTHER_URL
+}
+
+enum SubmissionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ScanStatus {
+  PENDING
+  CLEAN
+  INFECTED
+}
+
+enum TranscodeStatus {
+  PENDING
+  DONE
+  FAILED
+  NOT_REQUIRED
+}
+
+enum RoundStatus {
+  PENDING
+  VOTING_OPEN
+  CLOSED
+}
+
+enum MatchupStatus {
+  PENDING
+  VOTING_OPEN
+  DECIDED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth (Auth.js / NextAuth Prisma adapter) + app user
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  username      String    @unique
+  passwordHash  String?   @map("password_hash") // null when OAuth-only
+  displayName   String?   @map("display_name")
+  avatarUrl     String?   @map("avatar_url")
+  role          Role      @default(USER)
+  isBanned      Boolean   @default(false) @map("is_banned")
+  emailVerified DateTime? @map("email_verified")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  accounts            Account[]
+  sessions            Session[]
+  hostedChannels      Channel[]       @relation("HostChannels")
+  memberships         ChannelMember[]
+  mediaAssets         MediaAsset[]
+  votes               Vote[]
+  reviewedSubmissions Submission[]    @relation("ReviewedBy")
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Channel (the "room") + membership
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Channel {
+  id                String            @id @default(uuid())
+  code              String            @unique // shareable join code, e.g. "7K2P9X"
+  slug              String?           @unique // optional pretty URL for PUBLIC channels
+  name              String
+  description       String?
+  rules             String?
+  coverImageUrl     String?           @map("cover_image_url")
+  genre             String?
+  hostId            String            @map("host_id")
+  status            ChannelStatus     @default(DRAFT)
+  visibility        ChannelVisibility @default(UNLISTED)
+
+  submissionStartAt DateTime?         @map("submission_start_at")
+  submissionEndAt   DateTime?         @map("submission_end_at")
+  votingStartAt     DateTime?         @map("voting_start_at")
+  votingEndAt       DateTime?         @map("voting_end_at")
+
+  resultsVisibility ResultsVisibility @default(AFTER_CLOSE) @map("results_visibility")
+  voteScope         VoteScope         @default(PER_SUBMISSION) @map("vote_scope")
+  maxVotesPerVoter  Int               @default(1) @map("max_votes_per_voter")
+  allowGuestVotes   Boolean           @default(true) @map("allow_guest_votes")
+  requireLoginToVote Boolean          @default(false) @map("require_login_to_vote")
+  allowGuestUploads Boolean           @default(false) @map("allow_guest_uploads") // join-with-code + name, no account
+
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  host         User            @relation("HostChannels", fields: [hostId], references: [id])
+  members      ChannelMember[]
+  submissions  Submission[]
+  votes        Vote[]
+  battleRounds BattleRound[]
+
+  @@index([status])
+  @@index([hostId])
+  @@index([visibility, status])
+  @@map("channels")
+}
+
+// A participant in a room. Either a registered user OR a lightweight guest (token + display name).
+model ChannelMember {
+  id          String     @id @default(uuid())
+  channelId   String     @map("channel_id")
+  userId      String?    @map("user_id")      // set when the member is a registered user
+  guestToken  String?    @map("guest_token")  // set for code-only guests (signed cookie token)
+  displayName String     @map("display_name")
+  role        MemberRole @default(MEMBER)
+  createdAt   DateTime   @default(now()) @map("created_at")
+
+  channel     Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user        User?        @relation(fields: [userId], references: [id])
+  submissions Submission[]
+
+  @@unique([channelId, userId])
+  @@unique([channelId, guestToken])
+  @@index([channelId])
+  @@map("channel_members")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Submissions + media
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Submission {
+  id                String           @id @default(uuid())
+  channelId         String           @map("channel_id")
+  submitterMemberId String           @map("submitter_member_id")
+  artistName        String           @map("artist_name")
+  trackTitle        String           @map("track_title")
+  description       String?
+  sourceType        SourceType       @map("source_type")
+  mediaAssetId      String?          @unique @map("media_asset_id") // for uploads
+  externalUrl       String?          @map("external_url")           // for embeds
+  status            SubmissionStatus @default(PENDING)
+  rejectionReason   String?          @map("rejection_reason")
+  reviewedById      String?          @map("reviewed_by")
+  reviewedAt        DateTime?        @map("reviewed_at")
+  voteCount         Int              @default(0) @map("vote_count") // denormalized; truth = count(valid votes)
+  createdAt         DateTime         @default(now()) @map("created_at")
+
+  channel         Channel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  submitterMember ChannelMember @relation(fields: [submitterMemberId], references: [id])
+  reviewedBy      User?         @relation("ReviewedBy", fields: [reviewedById], references: [id])
+  mediaAsset      MediaAsset?   @relation(fields: [mediaAssetId], references: [id])
+  votes           Vote[]
+  matchupsAsA     Matchup[]     @relation("MatchupSubmissionA")
+  matchupsAsB     Matchup[]     @relation("MatchupSubmissionB")
+  matchupsWon     Matchup[]     @relation("MatchupWinner")
+
+  @@index([channelId, status])
+  @@map("submissions")
+}
+
+model MediaAsset {
+  id               String          @id @default(uuid())
+  ownerUserId      String?         @map("owner_user_id") // null for guest uploads
+  storageKey       String          @map("storage_key")
+  mimeType         String          @map("mime_type")
+  sizeBytes        Int             @map("size_bytes")
+  durationSeconds  Int?            @map("duration_seconds")
+  originalFilename String?         @map("original_filename")
+  scanStatus       ScanStatus      @default(PENDING) @map("scan_status")
+  transcodeStatus  TranscodeStatus @default(PENDING) @map("transcode_status")
+  previewKey       String?         @map("preview_key")
+  createdAt        DateTime        @default(now()) @map("created_at")
+
+  owner      User?       @relation(fields: [ownerUserId], references: [id])
+  submission Submission?
+
+  @@map("media_assets")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vote — the crux. Identity = user OR fingerprint (fallback cookie/guest token).
+// dedupeKey is computed app-side, namespaced; its UNIQUE is the final anti-double-vote guard:
+//   PER_SUBMISSION : "ch:{channelId}:s:{submissionId}:{identity}"
+//   PER_COMPETITION: "ch:{channelId}:{identity}"
+//   battle matchup : "m:{matchupId}:{identity}"
+// identity = "u:{userId}" if logged-in, else "f:{fingerprintHash}".
+// IP stays OUT of the unique (rate cap only) — NAT/mobile share IPs.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Vote {
+  id              String   @id @default(uuid())
+  channelId       String   @map("channel_id")
+  submissionId    String   @map("submission_id")
+  roundId         String?  @map("round_id")
+  matchupId       String?  @map("matchup_id")
+  voterUserId     String?  @map("voter_user_id")
+
+  ipHash          String   @map("ip_hash")          // HMAC, rate cap only
+  fingerprintHash String?  @map("fingerprint_hash") // HMAC, primary guest identity
+  cookieToken     String?  @map("cookie_token")     // signed httpOnly, soft check
+  userAgent       String?  @map("user_agent")
+
+  dedupeKey       String   @map("dedupe_key")
+  isValid         Boolean  @default(true) @map("is_valid")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  channel    Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  submission Submission   @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  round      BattleRound? @relation(fields: [roundId], references: [id])
+  matchup    Matchup?     @relation(fields: [matchupId], references: [id])
+  voter      User?        @relation(fields: [voterUserId], references: [id])
+
+  @@unique([dedupeKey]) // FINAL guard against double-voting (catches races)
+  @@index([channelId, isValid])
+  @@index([submissionId, isValid])
+  @@index([ipHash, channelId])
+  @@map("votes")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Battle system (single-elimination bracket)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model BattleRound {
+  id            String      @id @default(uuid())
+  channelId     String      @map("channel_id")
+  roundNumber   Int         @map("round_number")
+  name          String?     // e.g. "Ημιτελικοί"
+  status        RoundStatus @default(PENDING)
+  votingStartAt DateTime?   @map("voting_start_at")
+  votingEndAt   DateTime?   @map("voting_end_at")
+
+  channel  Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  matchups Matchup[]
+  votes    Vote[]
+
+  @@unique([channelId, roundNumber])
+  @@map("battle_rounds")
+}
+
+model Matchup {
+  id                 String        @id @default(uuid())
+  roundId            String        @map("round_id")
+  submissionAId      String        @map("submission_a_id")
+  submissionBId      String?       @map("submission_b_id") // null = bye
+  votesA             Int           @default(0) @map("votes_a")
+  votesB             Int           @default(0) @map("votes_b")
+  winnerSubmissionId String?       @map("winner_submission_id")
+  status             MatchupStatus @default(PENDING)
+
+  round       BattleRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  submissionA Submission  @relation("MatchupSubmissionA", fields: [submissionAId], references: [id])
+  submissionB Submission? @relation("MatchupSubmissionB", fields: [submissionBId], references: [id])
+  winner      Submission? @relation("MatchupWinner", fields: [winnerSubmissionId], references: [id])
+  votes       Vote[]
+
+  @@index([roundId])
+  @@map("matchups")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audit trail
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?  @map("actor_user_id")
+  action      String   // e.g. "vote.cast", "submission.approve", "channel.transition", "member.join"
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  metadata    Json?
+  ipHash      String?  @map("ip_hash")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  actor User? @relation(fields: [actorUserId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([actorUserId])
+  @@map("audit_logs")
+}
