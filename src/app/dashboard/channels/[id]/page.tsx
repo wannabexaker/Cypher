@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { SubmissionStatus } from "@prisma/client";
 import {
   ArrowLeft,
   CalendarClock,
   ExternalLink,
+  ListChecks,
   Music2,
   Radio,
   Users,
@@ -14,6 +16,7 @@ import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { ChannelStatusControl } from "@/components/channels/ChannelStatusControl";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { ManageChannelForm } from "@/components/channels/ManageChannelForm";
+import { ModerationQueue } from "@/components/submissions/ModerationQueue";
 import { buttonVariants } from "@/components/ui/button";
 import { canManageChannel } from "@/lib/channels";
 import { prisma } from "@/lib/prisma";
@@ -58,6 +61,42 @@ export default async function ManageChannelPage({ params }: PageProps) {
   });
 
   if (!channel || !canManageChannel(user, channel)) notFound();
+
+  const [pendingSubmissions, approvedCount, rejectedCount] = await Promise.all([
+    prisma.submission.findMany({
+      where: { channelId: channel.id, status: SubmissionStatus.PENDING },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        artistName: true,
+        trackTitle: true,
+        description: true,
+        sourceType: true,
+        mediaAssetId: true,
+        externalUrl: true,
+        createdAt: true,
+        submitterMember: { select: { displayName: true } },
+      },
+    }),
+    prisma.submission.count({
+      where: { channelId: channel.id, status: SubmissionStatus.APPROVED },
+    }),
+    prisma.submission.count({
+      where: { channelId: channel.id, status: SubmissionStatus.REJECTED },
+    }),
+  ]);
+
+  const moderationQueue = pendingSubmissions.map((submission) => ({
+    id: submission.id,
+    artistName: submission.artistName,
+    trackTitle: submission.trackTitle,
+    description: submission.description,
+    sourceType: submission.sourceType,
+    mediaAssetId: submission.mediaAssetId,
+    externalUrl: submission.externalUrl,
+    submitterName: submission.submitterMember.displayName,
+    createdAt: submission.createdAt.toISOString(),
+  }));
 
   return (
     <div className="section-shell py-8 sm:py-12">
@@ -174,6 +213,24 @@ export default async function ManageChannelPage({ params }: PageProps) {
               </ul>
             </div>
           </section>
+
+          <section className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-7">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <ListChecks className="size-5 text-lime" />
+                <h2 className="text-2xl font-bold text-foreground">
+                  Pending review
+                </h2>
+              </div>
+              <span className="font-mono text-sm text-muted-foreground">
+                {moderationQueue.length}
+              </span>
+            </div>
+
+            <div className="mt-6">
+              <ModerationQueue submissions={moderationQueue} />
+            </div>
+          </section>
         </div>
 
         <aside className="h-fit rounded-xl border border-border bg-surface p-6">
@@ -184,12 +241,26 @@ export default async function ManageChannelPage({ params }: PageProps) {
             Tracks
           </p>
           <h2 className="mt-2 text-xl font-bold text-foreground">
-            Uploads arrive in H04
+            Submission status
           </h2>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Membership is live. Submission, media, and moderation tools remain
-            intentionally out of scope here.
-          </p>
+          <dl className="mt-5 grid gap-3">
+            <div className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3">
+              <dt className="text-sm text-muted-foreground">Pending</dt>
+              <dd className="font-mono font-bold text-foreground">
+                {moderationQueue.length}
+              </dd>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3">
+              <dt className="text-sm text-muted-foreground">Approved</dt>
+              <dd className="font-mono font-bold text-lime">{approvedCount}</dd>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3">
+              <dt className="text-sm text-muted-foreground">Rejected</dt>
+              <dd className="font-mono font-bold text-magenta">
+                {rejectedCount}
+              </dd>
+            </div>
+          </dl>
         </aside>
       </div>
     </div>

@@ -1,13 +1,19 @@
-import { ChannelStatus } from "@prisma/client";
+import { ChannelStatus, SubmissionStatus } from "@prisma/client";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Crown, Radio, Users } from "lucide-react";
+import { ListMusic, Radio, Users } from "lucide-react";
 
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { JoinRoomPanel } from "@/components/channels/JoinRoomPanel";
+import {
+  SubmissionStatusPill,
+  type SubmissionStatusValue,
+} from "@/components/submissions/SubmissionStatusPill";
+import { SubmitTrackPanel } from "@/components/submissions/SubmitTrackPanel";
+import { TrackPlayer } from "@/components/submissions/TrackPlayer";
 import { buttonVariants } from "@/components/ui/button";
 import {
   GUEST_COOKIE_NAME,
@@ -78,6 +84,43 @@ export default async function ChannelRoomPage({ params }: PageProps) {
           select: { id: true },
         })
       : null;
+
+  const [approvedSubmissions, mySubmission] = await Promise.all([
+    prisma.submission.findMany({
+      where: { channelId: channel.id, status: SubmissionStatus.APPROVED },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        artistName: true,
+        trackTitle: true,
+        description: true,
+        sourceType: true,
+        externalUrl: true,
+        mediaAssetId: true,
+      },
+    }),
+    membership
+      ? prisma.submission.findFirst({
+          where: {
+            channelId: channel.id,
+            submitterMemberId: membership.id,
+          },
+          select: {
+            id: true,
+            status: true,
+            sourceType: true,
+            artistName: true,
+            trackTitle: true,
+            description: true,
+            rejectionReason: true,
+            externalUrl: true,
+            mediaAssetId: true,
+          },
+        })
+      : null,
+  ]);
+
+  const isOpen = channel.status === ChannelStatus.OPEN;
 
   return (
     <main id="main-content" className="min-h-svh bg-background">
@@ -166,14 +209,52 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                 {channel.rules ?? "The host has not posted room rules yet."}
               </p>
             </section>
-            <section className="rounded-xl border border-primary/30 bg-primary/10 p-6">
-              <Crown className="size-7 text-primary-glow" aria-hidden="true" />
-              <h3 className="mt-4 text-lg font-bold text-foreground">
-                The next drop
-              </h3>
-              <p className="mt-3 leading-7 text-muted-foreground">
-                Track submissions and host moderation arrive in H04.
-              </p>
+            <section className="rounded-xl border border-border bg-elevated p-6">
+              <div className="flex items-center gap-3">
+                <ListMusic className="size-6 text-primary-glow" aria-hidden="true" />
+                <h3 className="text-lg font-bold text-foreground">
+                  Approved tracks
+                </h3>
+                <span className="ml-auto font-mono text-xs text-muted-foreground">
+                  {approvedSubmissions.length}
+                </span>
+              </div>
+
+              {approvedSubmissions.length === 0 ? (
+                <p className="mt-4 leading-7 text-muted-foreground">
+                  No approved tracks yet. Once the host signs off, they drop here.
+                </p>
+              ) : (
+                <ul className="mt-5 grid gap-4">
+                  {approvedSubmissions.map((submission) => (
+                    <li
+                      key={submission.id}
+                      className="rounded-lg border border-border bg-background p-4"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-bold text-foreground">
+                          {submission.artistName} — {submission.trackTitle}
+                        </p>
+                        <span className="font-mono text-[0.625rem] font-bold tracking-[0.12em] text-cyan uppercase">
+                          {submission.sourceType}
+                        </span>
+                      </div>
+                      {submission.description && (
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                          {submission.description}
+                        </p>
+                      )}
+                      <TrackPlayer
+                        sourceType={submission.sourceType}
+                        mediaAssetId={submission.mediaAssetId}
+                        externalUrl={submission.externalUrl}
+                        trackTitle={submission.trackTitle}
+                        artistName={submission.artistName}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           </div>
         </div>
@@ -190,6 +271,53 @@ export default async function ChannelRoomPage({ params }: PageProps) {
             allowGuestUploads={channel.allowGuestUploads}
             completed={channel.status === ChannelStatus.COMPLETED}
           />
+
+          {membership && isOpen && (
+            <div className="mt-6">
+              <SubmitTrackPanel
+                code={channel.code}
+                mySubmission={
+                  mySubmission
+                    ? {
+                        ...mySubmission,
+                        status: mySubmission.status as SubmissionStatusValue,
+                      }
+                    : null
+                }
+              />
+            </div>
+          )}
+
+          {membership && !isOpen && mySubmission && (
+            <div className="mt-6 rounded-xl border border-border bg-elevated p-6">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-base font-bold text-foreground">
+                  Your submission
+                </h3>
+                <SubmissionStatusPill
+                  status={mySubmission.status as SubmissionStatusValue}
+                />
+              </div>
+              <p className="mt-3 font-bold text-foreground">
+                {mySubmission.artistName} — {mySubmission.trackTitle}
+              </p>
+              {mySubmission.status === "REJECTED" &&
+                mySubmission.rejectionReason && (
+                  <p className="mt-2 text-sm leading-6 text-magenta">
+                    {mySubmission.rejectionReason}
+                  </p>
+                )}
+              {mySubmission.status === "APPROVED" && (
+                <TrackPlayer
+                  sourceType={mySubmission.sourceType}
+                  mediaAssetId={mySubmission.mediaAssetId}
+                  externalUrl={mySubmission.externalUrl}
+                  trackTitle={mySubmission.trackTitle}
+                  artistName={mySubmission.artistName}
+                />
+              )}
+            </div>
+          )}
         </aside>
       </div>
     </main>

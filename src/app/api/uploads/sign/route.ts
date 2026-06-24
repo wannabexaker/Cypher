@@ -1,0 +1,110 @@
+import { ChannelStatus } from "@prisma/client";
+import { type NextRequest, NextResponse } from "next/server";
+
+import { extensionMatchesMime, sanitizeFilename } from "@/lib/media";
+import { findChannelMembership, resolveChannelIdentity } from "@/lib/membership";
+import { prisma } from "@/lib/prisma";
+import { buildStorageKey, createUploadUrl } from "@/lib/storage";
+import { signUploadSchema } from "@/lib/validation/submissions";
+
+export const runtime = "nodejs";
+
+export async function POST(request: NextRequest) {
+  let body: unknown = {};
+  try {
+    const text = await request.text();
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  const parsed = signUploadSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid upload details." },
+      { status: 400 },
+    );
+  }
+
+  const { channelCode, filename, mimeType, sizeBytes } = parsed.data;
+
+  if (!extensionMatchesMime(filename, mimeType)) {
+    return NextResponse.json(
+      { error: "File extension does not match its type." },
+      { status: 400 },
+    );
+  }
+
+  const channel = await prisma.channel.findUnique({
+    where: { code: channelCode },
+    select: { id: true, status: true, allowGuestUploads: true },
+  });
+
+  if (!channel) {
+    return NextResponse.json({ error: "Channel not found." }, { status: 404 });
+  }
+
+  if (channel.status !== ChannelStatus.OPEN) {
+    return NextResponse.json(
+      { error: "This room is not open for submissions." },
+      { status: 409 },
+    );
+  }
+
+  const identity = await resolveChannelIdentity(request);
+  const membership = await findChannelMembership(channel.id, identity);
+
+  if (!membership) {
+    return NextResponse.json(
+      { error: "Join the room before uploading." },
+      { status: 403 },
+    );
+  }
+
+  if (!identity.user && !channel.allowGuestUploads) {
+    return NextResponse.json(
+      { error: "Guests cannot upload in this room." },
+      { status: 403 },
+    );
+  }
+
+  const storageKey = buildStorageKey(mimeType);
+
+  let uploadUrl: string;
+  try {
+    uploadUrl = await createUploadUrl({
+      key: storageKey,
+      contentType: mimeType,
+      contentLength: sizeBytes,
+    });
+  } catch (error) {
+    console.error("Failed to presign upload", error);
+    return NextResponse.json(
+      { error: "Storage is not available right now." },
+      { status: 500 },
+    );
+  }
+
+  const asset = await prisma.mediaAsset.create({
+    data: {
+      ownerUserId: identity.user?.id ?? null,
+      storageKey,
+      mimeType,
+      sizeBytes,
+      originalFilename: sanitizeFilename(filename),
+      scanStatus: "PENDING",
+      transcodeStatus: "NOT_REQUIRED",
+    },
+    select: { id: true },
+  });
+
+  return NextResponse.json(
+    {
+      mediaAssetId: asset.id,
+      uploadUrl,
+      method: "PUT",
+      headers: { "Content-Type": mimeType },
+    },
+    { status: 201 },
+  );
+}
