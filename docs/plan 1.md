@@ -62,6 +62,27 @@ Host (account) ──creates──> Channel { code: "7K2P9X", host, settings }
 
 ---
 
+## 1c. Participation, moderators, timers & notifications (v1.1 — 2026-06-24)
+
+**Participation (Artist / Judge):** όταν ένας non-host μπαίνει με τον code, διαλέγει **ARTIST** ή **JUDGE** — ώστε ο host να ξέρει από πού να περιμένει τραγούδι. Δύο **ορθογώνιες** διαστάσεις στο `ChannelMember`:
+- `role` (management): `HOST | MODERATOR | MEMBER` — ποιος διαχειρίζεται.
+- `participation` (intent): `ARTIST | JUDGE` (nullable· null για host) — τι ήρθες να κάνεις.
+
+ARTIST → μπορεί να υποβάλει track. JUDGE → δηλώνει ότι ΔΕΝ θα ανεβάσει· ψηφίζει **σαν το κοινό** (**label-only για MVP**· weighting αργότερα αν χρειαστεί). **Moderators:** ο host δίνει `role=MODERATOR` σε artist *ή* judge (κρατώντας το `participation`) για βοήθεια στη διαχείριση. Authz: moderation = `role ∈ {HOST, MODERATOR}`· submission = `participation = ARTIST`.
+→ Schema (planned H05): enum `ParticipationType {ARTIST, JUDGE}` + `ChannelMember.participation ParticipationType?`.
+
+**Timers (auto-close + extend):** ο host ανοίγει submission/voting window με διάρκεια → χρησιμοποιεί τα υπάρχοντα `submission_start_at/end_at`, `voting_start_at/end_at`. Στο deadline **κλείνει αυτόματα**, αλλά ο host **παρατείνει** πριν λήξει. Auto-close = lazy check (`now > voting_end_at` σε κάθε vote/read) **+** scheduled flip (Vercel Cron / QStash) που αλλάζει `status` και πυροδοτεί notifications. Live **countdown** στο room (client από το server `voting_end_at`).
+
+**Notifications (in-app + web push):**
+- **In-app:** live banners/toasts όσο το room είναι ανοιχτό ("voting open", "5' left", results).
+- **Web push:** browser notifications ακόμα κι αν το tab είναι κλειστό → κρατάει τους participants ανοιχτούς. Service worker + **VAPID** keys + `PushSubscription` model.
+- Events: voting opened · X' left · voting closing/closed · results.
+→ Schema (planned H07): `PushSubscription { id, channel_id, user_id?|guest_token?, endpoint (unique), p256dh, auth, created_at }` + VAPID keys σε env.
+
+**Decisions (locked 2026-06-24):** judges = label-only · notifications = in-app **+** web push · timer = auto-close + extend.
+
+---
+
 ## 2. Tech stack
 
 | Layer | Επιλογή | Γιατί |
@@ -85,14 +106,20 @@ Host (account) ──creates──> Channel { code: "7K2P9X", host, settings }
 
 ## 3. User roles
 
+**Platform-level** (`users.role`):
 | Role | Δικαιώματα |
 |---|---|
-| **GUEST** (anonymous session) | Ακούει, ψηφίζει (αν το επιτρέπει ο διαγωνισμός), βλέπει αποτελέσματα κατά ρύθμιση |
-| **USER** | + ανεβάζει submission, ιστορικό ψήφων, προφίλ |
-| **ORGANIZER** | Δημιουργεί/διαχειρίζεται **δικούς του** διαγωνισμούς, approve/reject submissions, ανοιγοκλείνει voting, βλέπει stats, ορίζει winners/battles |
-| **ADMIN** | Όλα + διαχείριση χρηστών, bans, global logs, override |
+| **GUEST** (anonymous session) | Ακούει, ψηφίζει (κατά ρύθμιση), βλέπει αποτελέσματα κατά ρύθμιση |
+| **USER** | + φτιάχνει channels (γίνεται host), join, submit/vote, profile |
+| **ADMIN** | Platform-wide: διαχείριση χρηστών, bans, global logs, override |
 
-Το role ζει στο `users.role`. Ο guest **δεν** είναι row — είναι anonymous session (signed httpOnly cookie token). Authorization επιβάλλεται **server-side** σε κάθε route (όχι μόνο στο UI), με έλεγχο role **+ ownership**.
+**Channel-level** (`channel_members`, δες §1c) — δύο ορθογώνιες διαστάσεις:
+| Δίαστ. | Τιμές | Σημασία |
+|---|---|---|
+| `role` | `HOST` / `MODERATOR` / `MEMBER` | Διαχείριση room. Host = creator· moderator = host-appointed βοηθός. |
+| `participation` | `ARTIST` / `JUDGE` / null | Τι ήρθες να κάνεις. ARTIST submits· JUDGE votes (label-only)· null = host. |
+
+Authz: moderation = `role ∈ {HOST, MODERATOR}`· submit = `participation = ARTIST`. Ο guest **δεν** είναι user row — anonymous session (signed httpOnly cookie). Authorization **server-side** σε κάθε route (role + ownership/membership), όχι μόνο UI.
 
 ---
 
