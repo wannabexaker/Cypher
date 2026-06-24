@@ -178,6 +178,7 @@ model Channel {
   code              String            @unique // shareable join code, e.g. "7K2P9X"
   slug              String?           @unique // optional pretty URL for PUBLIC channels
   name              String
+  tagline           String?           // room's own hero headline / call (e.g. "Let the chat decide")
   description       String?
   rules             String?
   coverImageUrl     String?           @map("cover_image_url")

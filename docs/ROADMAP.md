@@ -22,10 +22,10 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 ## Phase 1 — Foundation  ← τρέχουσα
 - [x] `prisma/schema.prisma` (channels + channel_members + submissions + media + votes + battles + audit)
 - [x] Codex orchestration set up (`docs/CODEX_TASKS.md`, `docs/codex/`)
-- [~] **H01** → Codex: scaffold + design system + landing page (motion) — `docs/codex/handoff-01-foundation-landing.md`
-- [ ] **H02** → Postgres (Neon/Supabase) + `prisma migrate dev` + Auth.js (host accounts)
-- [ ] **H03** → Channel create + join-by-code + membership
-- [ ] Auth.js (register/login/session) + role middleware
+- [x] **H01** → scaffold + design system + landing page (motion) — ✅ reviewed, 100/100 Lighthouse
+- [x] **H02** → Postgres + `prisma migrate dev` (init) + Auth.js (host accounts) — ✅ reviewed
+- [~] **H03** → Channel create + join-by-code + membership — `docs/codex/handoff-03-channels.md`
+- [x] Auth.js (register/login/session) + server-side role guards — H02
 - [ ] Object storage (R2/MinIO) + presigned upload + validation
 - [ ] Upstash Redis (rate limit + vote dedup) — serverless-friendly για Vercel
 

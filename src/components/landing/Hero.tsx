@@ -10,7 +10,11 @@ import { WaveformBars } from "@/components/motion/WaveformBars";
 import { buttonVariants } from "@/components/ui/button";
 import { liveStats } from "@/lib/mock";
 
-export function Hero() {
+type HeroProps = {
+  createChannelHref: string;
+};
+
+export function Hero({ createChannelHref }: HeroProps) {
   const reduceMotion = useReducedMotion();
   const reveal = {
     hidden: { opacity: 0, y: reduceMotion ? 0 : 32 },
@@ -57,7 +61,7 @@ export function Hero() {
                 initial="hidden"
                 animate="visible"
               >
-                Where the
+                Let the
               </motion.span>
               <motion.span
                 className="text-gradient block motion-safe:animate-gradient"
@@ -66,7 +70,7 @@ export function Hero() {
                 initial="hidden"
                 animate="visible"
               >
-                crowd
+                chat
               </motion.span>
               <motion.span
                 className="block"
@@ -75,7 +79,7 @@ export function Hero() {
                 initial="hidden"
                 animate="visible"
               >
-                rules
+                decide
               </motion.span>
             </h1>
 
@@ -87,11 +91,11 @@ export function Hero() {
               className="mt-8 max-w-2xl"
             >
               <p className="text-lg leading-8 text-muted-foreground sm:text-xl">
-                Drop your bars. The crowd decides. Build a room, bring the artists,
+                Drop your bars. The chat decides. Spin up a room, drop the code,
                 and let every vote push the next name toward the crown.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <MagneticButton href="#start">
+                <MagneticButton href={createChannelHref}>
                   Create a channel
                   <ArrowRight />
                 </MagneticButton>

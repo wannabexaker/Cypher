@@ -6,7 +6,11 @@ import { MagneticButton } from "@/components/motion/MagneticButton";
 import { Reveal } from "@/components/motion/Reveal";
 import { WaveformBars } from "@/components/motion/WaveformBars";
 
-export function FinalCta() {
+type FinalCtaProps = {
+  createChannelHref: string;
+};
+
+export function FinalCta({ createChannelHref }: FinalCtaProps) {
   return (
     <section id="start" className="section-space">
       <div className="section-shell">
@@ -27,7 +31,7 @@ export function FinalCta() {
               </p>
               <WaveformBars compact className="mx-auto mt-8 max-w-xs" />
               <div className="mt-8 flex justify-center">
-                <MagneticButton href="#top" size="xl">
+                <MagneticButton href={createChannelHref} size="xl">
                   Create a channel
                   <ArrowRight />
                 </MagneticButton>

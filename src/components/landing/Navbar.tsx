@@ -1,7 +1,8 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, Menu, Radio, X } from "lucide-react";
+import { ArrowRight, LogOut, Menu, Radio, UserRound, X } from "lucide-react";
+import { signOut } from "next-auth/react";
 import { useState } from "react";
 
 import { CodeTyper } from "@/components/motion/CodeTyper";
@@ -14,10 +15,23 @@ const links = [
   { label: "Battles", href: "#battles" },
 ] as const;
 
-export function Navbar() {
+type NavbarProps = {
+  user: {
+    username: string;
+  } | null;
+};
+
+export function Navbar({ user }: NavbarProps) {
   const reduceMotion = useReducedMotion();
   const [menuOpen, setMenuOpen] = useState(false);
   const [codeOpen, setCodeOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const createChannelHref = user ? "/dashboard" : "/register";
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    await signOut({ redirectTo: "/" });
+  }
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/80 bg-background/90">
@@ -97,11 +111,39 @@ export function Navbar() {
               )}
             </AnimatePresence>
           </div>
+          {user ? (
+            <>
+              <a
+                href="/dashboard"
+                className={buttonVariants({ variant: "ghost", size: "sm" })}
+              >
+                <UserRound />
+                @{user.username}
+              </a>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={signingOut}
+                onClick={handleSignOut}
+              >
+                <LogOut />
+                {signingOut ? "Signing out…" : "Sign out"}
+              </Button>
+            </>
+          ) : (
+            <a
+              href="/login"
+              className={buttonVariants({ variant: "ghost", size: "sm" })}
+            >
+              Sign in
+            </a>
+          )}
           <a
-            href="#start"
+            href={createChannelHref}
             className={buttonVariants({ variant: "gradient", size: "sm" })}
           >
-            Create a channel
+            {user ? "Dashboard" : "Create a channel"}
           </a>
         </div>
 
@@ -150,12 +192,49 @@ export function Navbar() {
               >
                 Enter code
               </a>
+              {user ? (
+                <>
+                  <a
+                    href="/dashboard"
+                    className={cn(
+                      buttonVariants({ variant: "ghost", size: "default" }),
+                      "justify-start",
+                    )}
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    <UserRound />
+                    @{user.username}
+                  </a>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="default"
+                    className="justify-start"
+                    disabled={signingOut}
+                    onClick={handleSignOut}
+                  >
+                    <LogOut />
+                    {signingOut ? "Signing out…" : "Sign out"}
+                  </Button>
+                </>
+              ) : (
+                <a
+                  href="/login"
+                  className={cn(
+                    buttonVariants({ variant: "ghost", size: "default" }),
+                    "justify-start",
+                  )}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  Sign in
+                </a>
+              )}
               <a
-                href="#start"
+                href={createChannelHref}
                 className={buttonVariants({ variant: "gradient", size: "default" })}
                 onClick={() => setMenuOpen(false)}
               >
-                Create a channel
+                {user ? "Open dashboard" : "Create a channel"}
               </a>
             </div>
           </motion.div>

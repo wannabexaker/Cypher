@@ -6,18 +6,22 @@ import { Hero } from "@/components/landing/Hero";
 import { HowItWorks } from "@/components/landing/HowItWorks";
 import { LiveChannels } from "@/components/landing/LiveChannels";
 import { Navbar } from "@/components/landing/Navbar";
+import { getCurrentUser } from "@/lib/session";
 
-export default function Home() {
+export default async function Home() {
+  const user = await getCurrentUser();
+  const createChannelHref = user ? "/dashboard" : "/register";
+
   return (
     <>
-      <Navbar />
+      <Navbar user={user ? { username: user.username } : null} />
       <main id="main-content">
-        <Hero />
+        <Hero createChannelHref={createChannelHref} />
         <HowItWorks />
         <LiveChannels />
         <BattleTeaser />
         <GenresMarquee />
-        <FinalCta />
+        <FinalCta createChannelHref={createChannelHref} />
       </main>
       <Footer />
     </>
