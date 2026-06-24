@@ -68,6 +68,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (membership.participation !== "ARTIST") {
+    return NextResponse.json(
+      {
+        error:
+          membership.participation === "JUDGE"
+            ? "Judges vote — they don't submit tracks."
+            : "Only artists can upload tracks in this room.",
+      },
+      { status: 403 },
+    );
+  }
+
   const storageKey = buildStorageKey(mimeType);
 
   let uploadUrl: string;

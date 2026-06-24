@@ -35,6 +35,13 @@ enum MemberRole {
   MEMBER    // joined via code, can upload + vote
 }
 
+// How a non-host member takes part. ARTIST submits a track; JUDGE votes only
+// (label-only for now; vote weighting lands later). null for the host.
+enum ParticipationType {
+  ARTIST
+  JUDGE
+}
+
 enum ChannelVisibility {
   PUBLIC   // listed on /explore
   UNLISTED // code-only, not listed
@@ -222,6 +229,7 @@ model ChannelMember {
   guestToken  String?    @map("guest_token")  // set for code-only guests (signed cookie token)
   displayName String     @map("display_name")
   role        MemberRole @default(MEMBER)
+  participation ParticipationType? @map("participation") // ARTIST | JUDGE; null for the host
   createdAt   DateTime   @default(now()) @map("created_at")
 
   channel     Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)

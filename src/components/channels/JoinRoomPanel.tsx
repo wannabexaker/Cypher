@@ -1,11 +1,14 @@
 "use client";
 
-import { Check, LoaderCircle, LogIn, Mic2 } from "lucide-react";
+import { Check, Gavel, LoaderCircle, LogIn, Mic2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+
+type Participation = "ARTIST" | "JUDGE";
 
 type JoinRoomPanelProps = {
   code: string;
@@ -13,7 +16,69 @@ type JoinRoomPanelProps = {
   authenticated: boolean;
   allowGuestUploads: boolean;
   completed: boolean;
+  participation?: Participation | null;
 };
+
+const PARTICIPATION_OPTIONS: {
+  value: Participation;
+  label: string;
+  hint: string;
+  icon: typeof Mic2;
+}[] = [
+  { value: "ARTIST", label: "Artist", hint: "Submit a track", icon: Mic2 },
+  { value: "JUDGE", label: "Judge", hint: "Vote, don't submit", icon: Gavel },
+];
+
+function ParticipationChoice({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: Participation | "";
+  onChange: (next: Participation) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <fieldset className="mt-6" disabled={disabled}>
+      <legend className="mb-2 block text-sm font-bold text-foreground">
+        How are you taking part?
+      </legend>
+      <div className="grid grid-cols-2 gap-3">
+        {PARTICIPATION_OPTIONS.map((option) => {
+          const Icon = option.icon;
+          const selected = value === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(option.value)}
+              className={cn(
+                "flex min-h-11 flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60",
+                selected
+                  ? "border-lime/60 bg-lime/10"
+                  : "border-border bg-background hover:border-primary-glow/50",
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-flex items-center gap-2 font-bold",
+                  selected ? "text-lime" : "text-foreground",
+                )}
+              >
+                <Icon className="size-4" aria-hidden="true" />
+                {option.label}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {option.hint}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
 
 export function JoinRoomPanel({
   code,
@@ -21,19 +86,29 @@ export function JoinRoomPanel({
   authenticated,
   allowGuestUploads,
   completed,
+  participation = null,
 }: JoinRoomPanelProps) {
   const router = useRouter();
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [choice, setChoice] = useState<Participation | "">("");
 
   async function join(displayName?: string) {
+    if (!choice) {
+      setError("Pick Artist or Judge to join.");
+      return;
+    }
+
     setError("");
     setPending(true);
 
     const response = await fetch(`/api/channels/${code}/join`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(displayName ? { displayName } : {}),
+      body: JSON.stringify({
+        participation: choice,
+        ...(displayName ? { displayName } : {}),
+      }),
     });
 
     const payload = (await response.json()) as { error?: string };
@@ -52,6 +127,13 @@ export function JoinRoomPanel({
   }
 
   if (joined) {
+    const lane =
+      participation === "ARTIST"
+        ? "You're in as an Artist — drop your track below."
+        : participation === "JUDGE"
+          ? "You're judging this room — voting lands soon."
+          : "You're running this room.";
+
     return (
       <div className="rounded-xl border border-lime/30 bg-lime/10 p-6">
         <span className="flex size-12 items-center justify-center rounded-full bg-lime text-background">
@@ -63,9 +145,7 @@ export function JoinRoomPanel({
         <h2 className="mt-2 text-2xl font-bold text-foreground">
           Your place in the room is locked.
         </h2>
-        <p className="mt-3 leading-7 text-muted-foreground">
-          Drop your track — coming in H04.
-        </p>
+        <p className="mt-3 leading-7 text-muted-foreground">{lane}</p>
       </div>
     );
   }
@@ -93,6 +173,11 @@ export function JoinRoomPanel({
         <p className="mt-3 leading-7 text-muted-foreground">
           Join with your Cypher account. Re-entering is idempotent.
         </p>
+        <ParticipationChoice
+          value={choice}
+          onChange={setChoice}
+          disabled={pending}
+        />
         <Button
           type="button"
           variant="gradient"
@@ -172,6 +257,11 @@ export function JoinRoomPanel({
         minLength={2}
         maxLength={30}
         placeholder="Night Shift"
+      />
+      <ParticipationChoice
+        value={choice}
+        onChange={setChoice}
+        disabled={pending}
       />
       <Button
         type="submit"

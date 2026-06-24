@@ -16,6 +16,7 @@ import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { ChannelStatusControl } from "@/components/channels/ChannelStatusControl";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { ManageChannelForm } from "@/components/channels/ManageChannelForm";
+import { MemberRoleControl } from "@/components/channels/MemberRoleControl";
 import { ModerationQueue } from "@/components/submissions/ModerationQueue";
 import { buttonVariants } from "@/components/ui/button";
 import { canManageChannel } from "@/lib/channels";
@@ -54,6 +55,7 @@ export default async function ManageChannelPage({ params }: PageProps) {
           id: true,
           displayName: true,
           role: true,
+          participation: true,
           createdAt: true,
         },
       },
@@ -97,6 +99,46 @@ export default async function ManageChannelPage({ params }: PageProps) {
     submitterName: submission.submitterMember.displayName,
     createdAt: submission.createdAt.toISOString(),
   }));
+
+  const memberGroups = [
+    {
+      key: "HOST",
+      label: "Host",
+      accent: "text-magenta",
+      members: channel.members.filter((member) => member.role === "HOST"),
+    },
+    {
+      key: "ARTIST",
+      label: "Artists",
+      accent: "text-lime",
+      members: channel.members.filter(
+        (member) => member.role !== "HOST" && member.participation === "ARTIST",
+      ),
+    },
+    {
+      key: "JUDGE",
+      label: "Judges",
+      accent: "text-cyan",
+      members: channel.members.filter(
+        (member) => member.role !== "HOST" && member.participation === "JUDGE",
+      ),
+    },
+    {
+      key: "UNASSIGNED",
+      label: "Unassigned",
+      accent: "text-muted-foreground",
+      members: channel.members.filter(
+        (member) => member.role !== "HOST" && member.participation === null,
+      ),
+    },
+  ].filter((group) => group.members.length > 0);
+
+  const artistCount = channel.members.filter(
+    (member) => member.role !== "HOST" && member.participation === "ARTIST",
+  ).length;
+  const judgeCount = channel.members.filter(
+    (member) => member.role !== "HOST" && member.participation === "JUDGE",
+  ).length;
 
   return (
     <div className="section-shell py-8 sm:py-12">
@@ -181,36 +223,63 @@ export default async function ManageChannelPage({ params }: PageProps) {
                 <Users className="size-5 text-cyan" />
                 <h2 className="text-2xl font-bold text-foreground">Members</h2>
               </div>
-              <span className="font-mono text-sm text-muted-foreground">
-                {channel.members.length}
-              </span>
+              <div className="flex items-center gap-3 font-mono text-xs text-muted-foreground">
+                <span className="text-lime">{artistCount} artists</span>
+                <span aria-hidden="true">·</span>
+                <span className="text-cyan">{judgeCount} judges</span>
+              </div>
             </div>
 
-            <div className="mt-6 overflow-hidden rounded-lg border border-border">
-              <ul className="divide-y divide-border">
-                {channel.members.map((member) => (
-                  <li
-                    key={member.id}
-                    className="flex flex-col gap-3 bg-background px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div>
-                      <p className="font-bold text-foreground">
-                        {member.displayName}
-                      </p>
-                      <p className="mt-1 font-mono text-[0.6875rem] font-bold tracking-[0.12em] text-primary-glow uppercase">
-                        {member.role}
-                      </p>
-                    </div>
-                    <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                      <CalendarClock className="size-3.5" />
-                      Joined{" "}
-                      {new Intl.DateTimeFormat("en", {
-                        dateStyle: "medium",
-                      }).format(member.createdAt)}
+            <div className="mt-6 space-y-6">
+              {memberGroups.map((group) => (
+                <div key={group.key}>
+                  <div className="flex items-center justify-between gap-3">
+                    <p
+                      className={`font-mono text-[0.6875rem] font-bold tracking-[0.16em] uppercase ${group.accent}`}
+                    >
+                      {group.label}
+                    </p>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {group.members.length}
                     </span>
-                  </li>
-                ))}
-              </ul>
+                  </div>
+                  <ul className="mt-3 overflow-hidden rounded-lg border border-border divide-y divide-border">
+                    {group.members.map((member) => (
+                      <li
+                        key={member.id}
+                        className="flex flex-col gap-3 bg-background px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-bold text-foreground">
+                              {member.displayName}
+                            </p>
+                            {member.role === "MODERATOR" && (
+                              <span className="inline-flex items-center rounded-full border border-primary-glow/40 bg-primary/10 px-2 py-0.5 font-mono text-[0.625rem] font-bold tracking-[0.12em] text-primary-glow uppercase">
+                                Mod
+                              </span>
+                            )}
+                          </div>
+                          <span className="mt-1 inline-flex items-center gap-2 text-xs text-muted-foreground">
+                            <CalendarClock className="size-3.5" />
+                            Joined{" "}
+                            {new Intl.DateTimeFormat("en", {
+                              dateStyle: "medium",
+                            }).format(member.createdAt)}
+                          </span>
+                        </div>
+                        {member.role !== "HOST" && (
+                          <MemberRoleControl
+                            channelId={channel.id}
+                            memberId={member.id}
+                            role={member.role}
+                          />
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </div>
           </section>
 

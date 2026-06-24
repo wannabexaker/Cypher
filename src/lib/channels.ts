@@ -1,6 +1,7 @@
 import { randomInt } from "node:crypto";
 
 import {
+  MemberRole,
   Prisma,
   Role,
   type User,
@@ -26,6 +27,27 @@ export function canManageChannel(
   channel: { hostId: string },
 ) {
   return user.role === Role.ADMIN || channel.hostId === user.id;
+}
+
+// Who may review submissions: the host, a platform ADMIN, or a registered user
+// who is a MODERATOR member of that channel. Channel settings/status stay
+// host/ADMIN only (canManageChannel).
+export async function canModerateChannel(
+  user: ChannelManager,
+  channel: { id: string; hostId: string },
+) {
+  if (canManageChannel(user, channel)) return true;
+
+  const moderator = await prisma.channelMember.findFirst({
+    where: {
+      channelId: channel.id,
+      userId: user.id,
+      role: MemberRole.MODERATOR,
+    },
+    select: { id: true },
+  });
+
+  return moderator !== null;
 }
 
 export async function createChannelWithUniqueCode({

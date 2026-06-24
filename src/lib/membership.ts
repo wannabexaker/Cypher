@@ -14,6 +14,7 @@ export type ChannelIdentity = {
 const MEMBER_SELECT = {
   id: true,
   role: true,
+  participation: true,
   userId: true,
   guestToken: true,
   displayName: true,
@@ -22,6 +23,7 @@ const MEMBER_SELECT = {
 export type ChannelMembership = {
   id: string;
   role: "HOST" | "MODERATOR" | "MEMBER";
+  participation: "ARTIST" | "JUDGE" | null;
   userId: string | null;
   guestToken: string | null;
   displayName: string;

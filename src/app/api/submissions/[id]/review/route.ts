@@ -1,7 +1,7 @@
 import { SubmissionStatus } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { canManageChannel } from "@/lib/channels";
+import { canModerateChannel } from "@/lib/channels";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { reviewSubmissionSchema } from "@/lib/validation/submissions";
@@ -53,7 +53,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Submission not found." }, { status: 404 });
   }
 
-  if (!canManageChannel(user, { hostId: submission.channel.hostId })) {
+  if (
+    !(await canModerateChannel(user, {
+      id: submission.channelId,
+      hostId: submission.channel.hostId,
+    }))
+  ) {
     return NextResponse.json(
       { error: "You cannot moderate this room." },
       { status: 403 },

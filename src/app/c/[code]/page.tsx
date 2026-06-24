@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ListMusic, Radio, Users } from "lucide-react";
+import { Gavel, ListMusic, Radio, Users } from "lucide-react";
 
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { CopyButton } from "@/components/channels/CopyButton";
@@ -71,7 +71,7 @@ export default async function ChannelRoomPage({ params }: PageProps) {
             userId: user.id,
           },
         },
-        select: { id: true },
+        select: { id: true, role: true, participation: true },
       })
     : guestToken
       ? await prisma.channelMember.findUnique({
@@ -81,7 +81,7 @@ export default async function ChannelRoomPage({ params }: PageProps) {
               guestToken,
             },
           },
-          select: { id: true },
+          select: { id: true, role: true, participation: true },
         })
       : null;
 
@@ -270,9 +270,10 @@ export default async function ChannelRoomPage({ params }: PageProps) {
             authenticated={Boolean(user)}
             allowGuestUploads={channel.allowGuestUploads}
             completed={channel.status === ChannelStatus.COMPLETED}
+            participation={membership?.participation ?? undefined}
           />
 
-          {membership && isOpen && (
+          {membership && isOpen && membership.participation === "ARTIST" && (
             <div className="mt-6">
               <SubmitTrackPanel
                 code={channel.code}
@@ -285,6 +286,19 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                     : null
                 }
               />
+            </div>
+          )}
+
+          {membership && isOpen && membership.participation === "JUDGE" && (
+            <div className="mt-6 rounded-xl border border-border bg-elevated p-6">
+              <div className="flex items-center gap-2 font-mono text-xs font-bold tracking-[0.16em] text-cyan uppercase">
+                <Gavel className="size-4" />
+                Judge seat
+              </div>
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                You joined as a judge. Judges listen and decide — they don&apos;t
+                submit tracks. Voting tools land in a later drop.
+              </p>
             </div>
           )}
 

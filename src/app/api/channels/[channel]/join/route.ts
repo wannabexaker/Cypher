@@ -77,6 +77,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ joined: true, memberId: existing.id });
     }
 
+    if (!parsed.data.participation) {
+      return NextResponse.json(
+        { error: "Choose whether you'll compete as an Artist or judge as a Judge." },
+        { status: 400 },
+      );
+    }
+
     try {
       const member = await prisma.$transaction(async (transaction) => {
         const created = await transaction.channelMember.create({
@@ -85,6 +92,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
             userId: user.id,
             displayName: user.displayName ?? user.username,
             role: MemberRole.MEMBER,
+            participation: parsed.data.participation,
           },
           select: { id: true },
         });
@@ -95,7 +103,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
             action: "member.join",
             entityType: "channel",
             entityId: channel.id,
-            metadata: { memberId: created.id, identity: "user" },
+            metadata: {
+              memberId: created.id,
+              identity: "user",
+              participation: parsed.data.participation,
+            },
           },
         });
 
@@ -176,6 +188,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
+    if (!parsed.data.participation) {
+      return NextResponse.json(
+        { error: "Choose whether you'll compete as an Artist or judge as a Judge." },
+        { status: 400 },
+      );
+    }
+
     const member = await prisma.$transaction(async (transaction) => {
       const created = await transaction.channelMember.create({
         data: {
@@ -183,6 +202,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
           guestToken: guestSession.guestToken,
           displayName: parsed.data.displayName!,
           role: MemberRole.MEMBER,
+          participation: parsed.data.participation,
         },
         select: { id: true },
       });
@@ -192,7 +212,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
           action: "member.join",
           entityType: "channel",
           entityId: channel.id,
-          metadata: { memberId: created.id, identity: "guest" },
+          metadata: {
+            memberId: created.id,
+            identity: "guest",
+            participation: parsed.data.participation,
+          },
         },
       });
 

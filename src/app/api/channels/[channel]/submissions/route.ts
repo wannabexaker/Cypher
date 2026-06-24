@@ -86,6 +86,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
+  if (membership.participation !== "ARTIST") {
+    return NextResponse.json(
+      {
+        error:
+          membership.participation === "JUDGE"
+            ? "Judges vote — they don't submit tracks."
+            : "Only artists can submit tracks in this room.",
+      },
+      { status: 403 },
+    );
+  }
+
   // One active submission per member: an approved track is locked; a pending or
   // rejected one is replaced by this new submission.
   const existing = await prisma.submission.findFirst({

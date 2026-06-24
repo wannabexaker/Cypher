@@ -1,6 +1,8 @@
 import {
   ChannelStatus,
   ChannelVisibility,
+  MemberRole,
+  ParticipationType,
 } from "@prisma/client";
 import { z } from "zod";
 
@@ -48,6 +50,17 @@ export const updateChannelSchema = editableChannelFieldsSchema
   })
   .refine((value) => Object.keys(value).length > 0);
 
+export const participationSchema = z.enum([
+  ParticipationType.ARTIST,
+  ParticipationType.JUDGE,
+]);
+
 export const joinChannelSchema = z.object({
   displayName: z.string().trim().min(2).max(30).optional(),
+  participation: participationSchema.optional(),
+});
+
+// Host/ADMIN promote or demote a member. HOST is never a valid target value.
+export const updateMemberRoleSchema = z.object({
+  role: z.enum([MemberRole.MODERATOR, MemberRole.MEMBER]),
 });
