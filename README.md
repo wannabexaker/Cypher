@@ -8,8 +8,9 @@ Current implementation:
 
 - H01: landing page, motion system, mock live channels, and design tokens
 - H02: PostgreSQL/Prisma wiring, host authentication, and gated dashboard shell
+- H03: channel creation, host management, join codes, and registered/guest membership
 
-Channel creation, join codes, uploads, voting, and real battles remain intentionally out of scope until later handoffs.
+Uploads, voting, real battles, and public discovery remain intentionally out of scope until later handoffs.
 
 ## Requirements
 
@@ -86,7 +87,15 @@ Never commit a populated `.env`.
 - Google OAuth is optional and uses the Prisma adapter
 - Session data exposes `id`, `username`, and `role`
 
-The dashboard intentionally contains a disabled channel-creation control. H03 implements the real channel workflow.
+## Channel flow
+
+- Authenticated hosts create rooms at `/dashboard/channels/new`
+- Each room receives a cryptographically generated six-character code
+- Hosts manage settings, `DRAFT`/`OPEN` state, and members from `/dashboard/channels/[id]`
+- Members enter a code at `/join` and land on `/c/[code]`
+- Registered joins are tied to the account
+- Optional guest joins use a signed, httpOnly `cypher_guest` cookie
+- Track submission remains a placeholder for H04
 
 ## Commands
 
@@ -122,8 +131,9 @@ Reusable primitives now include:
 
 - `Button` variants via CVA
 - `Input`
+- `Textarea`
 - auth shell and form components
-- shared motion components
-- responsive dashboard shell
+- channel forms, status badges, copy controls, and join panels
+- shared motion components and responsive dashboard shell
 
 All visible controls retain 44px minimum tap targets, focus states, and reduced-motion behavior.

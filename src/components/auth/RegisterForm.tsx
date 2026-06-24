@@ -15,7 +15,11 @@ import { Input } from "@/components/ui/input";
 
 const genericError = "We could not create an account with those details.";
 
-export function RegisterForm() {
+type RegisterFormProps = {
+  redirectTo?: string;
+};
+
+export function RegisterForm({ redirectTo = "/dashboard" }: RegisterFormProps) {
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
 
@@ -45,7 +49,7 @@ export function RegisterForm() {
       email: credentials.email,
       password: credentials.password,
       redirect: false,
-      redirectTo: "/dashboard",
+      redirectTo,
     });
 
     if (!result.ok || result.error) {
@@ -54,7 +58,7 @@ export function RegisterForm() {
       return;
     }
 
-    window.location.assign(result.url ?? "/dashboard");
+    window.location.assign(result.url ?? redirectTo);
   }
 
   return (
@@ -67,7 +71,7 @@ export function RegisterForm() {
           Claim your room name
         </h2>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Account setup is live. Channel creation arrives in H03.
+          Create rooms, share join codes, and manage the crowd from one account.
         </p>
       </div>
 
@@ -182,7 +186,7 @@ export function RegisterForm() {
       <p className="mt-7 text-center text-sm text-muted-foreground">
         Already registered?{" "}
         <a
-          href="/login"
+          href={`/login?next=${encodeURIComponent(redirectTo)}`}
           className="inline-flex min-h-11 items-center font-bold text-primary-glow transition-colors hover:text-cyan"
         >
           Sign in

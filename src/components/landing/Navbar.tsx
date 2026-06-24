@@ -1,11 +1,10 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, LogOut, Menu, Radio, UserRound, X } from "lucide-react";
+import { LogOut, Menu, Radio, UserRound, X } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useState } from "react";
 
-import { CodeTyper } from "@/components/motion/CodeTyper";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -24,7 +23,6 @@ type NavbarProps = {
 export function Navbar({ user }: NavbarProps) {
   const reduceMotion = useReducedMotion();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [codeOpen, setCodeOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const createChannelHref = user ? "/dashboard" : "/register";
 
@@ -70,47 +68,13 @@ export function Navbar({ user }: NavbarProps) {
         </div>
 
         <div className="hidden items-center gap-2 sm:flex">
-          <div className="relative">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-expanded={codeOpen}
-              aria-controls="nav-code-panel"
-              onClick={() => setCodeOpen((open) => !open)}
-            >
-              <Radio />
-              Enter code
-            </Button>
-            <AnimatePresence>
-              {codeOpen && (
-                <motion.div
-                  id="nav-code-panel"
-                  initial={reduceMotion ? false : { opacity: 0, y: -8, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={reduceMotion ? undefined : { opacity: 0, y: -8, scale: 0.98 }}
-                  transition={{ duration: 0.2 }}
-                  className="absolute right-0 top-[calc(100%+0.75rem)] w-72 rounded-lg border border-border bg-elevated p-4 shadow-panel"
-                >
-                  <p className="font-mono text-[0.6875rem] font-bold tracking-[0.16em] text-cyan uppercase">
-                    Try a demo code
-                  </p>
-                  <CodeTyper className="mt-3 w-full" />
-                  <a
-                    href="#join-demo"
-                    className={cn(
-                      buttonVariants({ variant: "gradient", size: "sm" }),
-                      "mt-3 w-full",
-                    )}
-                    onClick={() => setCodeOpen(false)}
-                  >
-                    Open channel
-                    <ArrowRight />
-                  </a>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+          <a
+            href="/join"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <Radio />
+            Enter code
+          </a>
           {user ? (
             <>
               <a
@@ -186,7 +150,7 @@ export function Navbar({ user }: NavbarProps) {
                 </a>
               ))}
               <a
-                href="#join-demo"
+                href="/join"
                 className={buttonVariants({ variant: "outline", size: "default" })}
                 onClick={() => setMenuOpen(false)}
               >

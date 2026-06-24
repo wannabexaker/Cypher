@@ -38,7 +38,7 @@ export function FinalCta({ createChannelHref }: FinalCtaProps) {
               </div>
               <p className="mt-5 inline-flex items-center gap-2 font-mono text-[0.6875rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
                 <Radio className="size-3.5 text-lime" aria-hidden="true" />
-                Static preview — channel tools arrive in H03
+                Channel rooms and join codes are live
               </p>
             </div>
             <div className="absolute -top-24 -left-24 size-72 rounded-full bg-primary/15 shadow-glow-primary" />

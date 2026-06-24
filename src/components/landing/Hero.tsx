@@ -100,7 +100,7 @@ export function Hero({ createChannelHref }: HeroProps) {
                   <ArrowRight />
                 </MagneticButton>
                 <a
-                  href="#join-demo"
+                  href="/join"
                   className={buttonVariants({ variant: "outline", size: "lg" })}
                 >
                   <Radio />
@@ -144,6 +144,13 @@ export function Hero({ createChannelHref }: HeroProps) {
               </span>
               <span className="font-mono text-lime">ROUND 02</span>
             </div>
+            <a
+              href="/join"
+              className={`${buttonVariants({ variant: "gradient", size: "sm" })} mt-5 w-full`}
+            >
+              Enter a room
+              <ArrowRight />
+            </a>
           </motion.aside>
         </div>
 

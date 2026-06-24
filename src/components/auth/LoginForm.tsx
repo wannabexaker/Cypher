@@ -9,11 +9,15 @@ import { Input } from "@/components/ui/input";
 
 type LoginFormProps = {
   googleEnabled: boolean;
+  redirectTo?: string;
 };
 
 const genericError = "We could not sign you in with those details.";
 
-export function LoginForm({ googleEnabled }: LoginFormProps) {
+export function LoginForm({
+  googleEnabled,
+  redirectTo = "/dashboard",
+}: LoginFormProps) {
   const [error, setError] = useState("");
   const [pendingProvider, setPendingProvider] = useState<
     "credentials" | "google" | null
@@ -27,7 +31,7 @@ export function LoginForm({ googleEnabled }: LoginFormProps) {
       email: String(formData.get("email") ?? ""),
       password: String(formData.get("password") ?? ""),
       redirect: false,
-      redirectTo: "/dashboard",
+      redirectTo,
     });
 
     if (!result.ok || result.error) {
@@ -36,13 +40,13 @@ export function LoginForm({ googleEnabled }: LoginFormProps) {
       return;
     }
 
-    window.location.assign(result.url ?? "/dashboard");
+    window.location.assign(result.url ?? redirectTo);
   }
 
   async function handleGoogle() {
     setError("");
     setPendingProvider("google");
-    await signIn("google", { redirectTo: "/dashboard" });
+    await signIn("google", { redirectTo });
   }
 
   return (
@@ -167,7 +171,7 @@ export function LoginForm({ googleEnabled }: LoginFormProps) {
       <p className="mt-7 text-center text-sm text-muted-foreground">
         New host?{" "}
         <a
-          href="/register"
+          href={`/register?next=${encodeURIComponent(redirectTo)}`}
           className="inline-flex min-h-11 items-center font-bold text-primary-glow transition-colors hover:text-cyan"
         >
           Create your account

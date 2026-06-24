@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { AuthShell } from "@/components/auth/AuthShell";
 import { RegisterForm } from "@/components/auth/RegisterForm";
+import { getSafeRedirect } from "@/lib/redirects";
 import { getCurrentUser } from "@/lib/session";
 
 export const metadata: Metadata = {
@@ -10,8 +11,13 @@ export const metadata: Metadata = {
   description: "Register a Cypher host account.",
 };
 
-export default async function RegisterPage() {
-  if (await getCurrentUser()) redirect("/dashboard");
+type RegisterPageProps = {
+  searchParams: Promise<{ next?: string | string[] }>;
+};
+
+export default async function RegisterPage({ searchParams }: RegisterPageProps) {
+  const redirectTo = getSafeRedirect((await searchParams).next);
+  if (await getCurrentUser()) redirect(redirectTo);
 
   return (
     <AuthShell
@@ -21,9 +27,9 @@ export default async function RegisterPage() {
           Build your <span className="text-gradient">identity</span>
         </>
       }
-      description="Start with a secure host account. The room code, submissions, and crowd mechanics arrive next."
+      description="Start with a secure account, create rooms, and carry your identity into every channel you join."
     >
-      <RegisterForm />
+      <RegisterForm redirectTo={redirectTo} />
     </AuthShell>
   );
 }

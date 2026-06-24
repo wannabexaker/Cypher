@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { googleAuthEnabled } from "@/auth";
 import { AuthShell } from "@/components/auth/AuthShell";
 import { LoginForm } from "@/components/auth/LoginForm";
+import { getSafeRedirect } from "@/lib/redirects";
 import { getCurrentUser } from "@/lib/session";
 
 export const metadata: Metadata = {
@@ -11,8 +12,13 @@ export const metadata: Metadata = {
   description: "Sign in to your Cypher host workspace.",
 };
 
-export default async function LoginPage() {
-  if (await getCurrentUser()) redirect("/dashboard");
+type LoginPageProps = {
+  searchParams: Promise<{ next?: string | string[] }>;
+};
+
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const redirectTo = getSafeRedirect((await searchParams).next);
+  if (await getCurrentUser()) redirect(redirectTo);
 
   return (
     <AuthShell
@@ -24,7 +30,7 @@ export default async function LoginPage() {
       }
       description="Your host identity is the key to every room you create, moderate, and carry through the bracket."
     >
-      <LoginForm googleEnabled={googleAuthEnabled} />
+      <LoginForm googleEnabled={googleAuthEnabled} redirectTo={redirectTo} />
     </AuthShell>
   );
 }
