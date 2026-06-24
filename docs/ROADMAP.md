@@ -24,9 +24,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] Codex orchestration set up (`docs/CODEX_TASKS.md`, `docs/codex/`)
 - [x] **H01** → scaffold + design system + landing page (motion) — ✅ reviewed, 100/100 Lighthouse
 - [x] **H02** → Postgres + `prisma migrate dev` (init) + Auth.js (host accounts) — ✅ reviewed
-- [~] **H03** → Channel create + join-by-code + membership — `docs/codex/handoff-03-channels.md`
+- [x] **H03** → Channel create + join-by-code + membership — ✅ reviewed + 🔒 security pass
+- [x] **H01–H03 merged to `main`** (linear) 2026-06-24
+- [~] **H04** → Uploads (presigned) + submissions + host moderation + player — `docs/codex/handoff-04-uploads.md`
 - [x] Auth.js (register/login/session) + server-side role guards — H02
-- [ ] Object storage (R2/MinIO) + presigned upload + validation
+- [ ] Object storage (R2/MinIO) + presigned upload + validation — H04
 - [ ] Upstash Redis (rate limit + vote dedup) — serverless-friendly για Vercel
 
 ## Phase 2 — Core loop (MVP)
