@@ -30,9 +30,9 @@ enum Role {
 }
 
 enum MemberRole {
-  HOST      // creator / admin of the room
+  HOST // creator / admin of the room
   MODERATOR // can help review submissions
-  MEMBER    // joined via code, can upload + vote
+  MEMBER // joined via code, can upload + vote
 }
 
 // How a non-host member takes part. ARTIST submits a track; JUDGE votes only
@@ -43,13 +43,13 @@ enum ParticipationType {
 }
 
 enum ChannelVisibility {
-  PUBLIC   // listed on /explore
+  PUBLIC // listed on /explore
   UNLISTED // code-only, not listed
 }
 
 enum ChannelStatus {
   DRAFT
-  OPEN              // submissions open (artists drop tracks)
+  OPEN // submissions open (artists drop tracks)
   SUBMISSIONS_CLOSED
   VOTING_OPEN
   VOTING_CLOSED
@@ -59,14 +59,19 @@ enum ChannelStatus {
 }
 
 enum ResultsVisibility {
-  LIVE        // live counts visible to everyone
-  HIDDEN      // host-only
+  LIVE // live counts visible to everyone
+  HIDDEN // host-only
   AFTER_CLOSE // revealed when voting closes
 }
 
 enum VoteScope {
-  PER_SUBMISSION  // one vote per track per voter
+  PER_SUBMISSION // one vote per track per voter
   PER_COMPETITION // one vote total per voter (pick a favorite)
+}
+
+enum VoteChoice {
+  WIN
+  LOSS
 }
 
 enum SourceType {
@@ -181,33 +186,33 @@ model VerificationToken {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Channel {
-  id                String            @id @default(uuid())
-  code              String            @unique // shareable join code, e.g. "7K2P9X"
-  slug              String?           @unique // optional pretty URL for PUBLIC channels
-  name              String
-  tagline           String?           // room's own hero headline / call (e.g. "Let the chat decide")
-  description       String?
-  rules             String?
-  coverImageUrl     String?           @map("cover_image_url")
-  genre             String?
-  hostId            String            @map("host_id")
-  status            ChannelStatus     @default(DRAFT)
-  visibility        ChannelVisibility @default(UNLISTED)
+  id            String            @id @default(uuid())
+  code          String            @unique // shareable join code, e.g. "7K2P9X"
+  slug          String?           @unique // optional pretty URL for PUBLIC channels
+  name          String
+  tagline       String? // room's own hero headline / call (e.g. "Let the chat decide")
+  description   String?
+  rules         String?
+  coverImageUrl String?           @map("cover_image_url")
+  genre         String?
+  hostId        String            @map("host_id")
+  status        ChannelStatus     @default(DRAFT)
+  visibility    ChannelVisibility @default(UNLISTED)
 
-  submissionStartAt DateTime?         @map("submission_start_at")
-  submissionEndAt   DateTime?         @map("submission_end_at")
-  votingStartAt     DateTime?         @map("voting_start_at")
-  votingEndAt       DateTime?         @map("voting_end_at")
+  submissionStartAt DateTime? @map("submission_start_at")
+  submissionEndAt   DateTime? @map("submission_end_at")
+  votingStartAt     DateTime? @map("voting_start_at")
+  votingEndAt       DateTime? @map("voting_end_at")
 
-  resultsVisibility ResultsVisibility @default(AFTER_CLOSE) @map("results_visibility")
-  voteScope         VoteScope         @default(PER_SUBMISSION) @map("vote_scope")
-  maxVotesPerVoter  Int               @default(1) @map("max_votes_per_voter")
-  allowGuestVotes   Boolean           @default(true) @map("allow_guest_votes")
-  requireLoginToVote Boolean          @default(false) @map("require_login_to_vote")
-  allowGuestUploads Boolean           @default(false) @map("allow_guest_uploads") // join-with-code + name, no account
+  resultsVisibility  ResultsVisibility @default(AFTER_CLOSE) @map("results_visibility")
+  voteScope          VoteScope         @default(PER_SUBMISSION) @map("vote_scope")
+  maxVotesPerVoter   Int               @default(1) @map("max_votes_per_voter")
+  allowGuestVotes    Boolean           @default(true) @map("allow_guest_votes")
+  requireLoginToVote Boolean           @default(false) @map("require_login_to_vote")
+  allowGuestUploads  Boolean           @default(false) @map("allow_guest_uploads") // join-with-code + name, no account
 
-  createdAt         DateTime          @default(now()) @map("created_at")
-  updatedAt         DateTime          @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   host         User            @relation("HostChannels", fields: [hostId], references: [id])
   members      ChannelMember[]
@@ -223,14 +228,14 @@ model Channel {
 
 // A participant in a room. Either a registered user OR a lightweight guest (token + display name).
 model ChannelMember {
-  id          String     @id @default(uuid())
-  channelId   String     @map("channel_id")
-  userId      String?    @map("user_id")      // set when the member is a registered user
-  guestToken  String?    @map("guest_token")  // set for code-only guests (signed cookie token)
-  displayName String     @map("display_name")
-  role        MemberRole @default(MEMBER)
+  id            String             @id @default(uuid())
+  channelId     String             @map("channel_id")
+  userId        String?            @map("user_id") // set when the member is a registered user
+  guestToken    String?            @map("guest_token") // set for code-only guests (signed cookie token)
+  displayName   String             @map("display_name")
+  role          MemberRole         @default(MEMBER)
   participation ParticipationType? @map("participation") // ARTIST | JUDGE; null for the host
-  createdAt   DateTime   @default(now()) @map("created_at")
+  createdAt     DateTime           @default(now()) @map("created_at")
 
   channel     Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
   user        User?        @relation(fields: [userId], references: [id])
@@ -255,12 +260,14 @@ model Submission {
   description       String?
   sourceType        SourceType       @map("source_type")
   mediaAssetId      String?          @unique @map("media_asset_id") // for uploads
-  externalUrl       String?          @map("external_url")           // for embeds
+  externalUrl       String?          @map("external_url") // for embeds
   status            SubmissionStatus @default(PENDING)
   rejectionReason   String?          @map("rejection_reason")
   reviewedById      String?          @map("reviewed_by")
   reviewedAt        DateTime?        @map("reviewed_at")
   voteCount         Int              @default(0) @map("vote_count") // denormalized; truth = count(valid votes)
+  winCount          Int              @default(0) @map("win_count")
+  lossCount         Int              @default(0) @map("loss_count")
   createdAt         DateTime         @default(now()) @map("created_at")
 
   channel         Channel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
@@ -306,21 +313,22 @@ model MediaAsset {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Vote {
-  id              String   @id @default(uuid())
-  channelId       String   @map("channel_id")
-  submissionId    String   @map("submission_id")
-  roundId         String?  @map("round_id")
-  matchupId       String?  @map("matchup_id")
-  voterUserId     String?  @map("voter_user_id")
+  id           String  @id @default(uuid())
+  channelId    String  @map("channel_id")
+  submissionId String  @map("submission_id")
+  roundId      String? @map("round_id")
+  matchupId    String? @map("matchup_id")
+  voterUserId  String? @map("voter_user_id")
 
-  ipHash          String   @map("ip_hash")          // HMAC, rate cap only
-  fingerprintHash String?  @map("fingerprint_hash") // HMAC, primary guest identity
-  cookieToken     String?  @map("cookie_token")     // signed httpOnly, soft check
-  userAgent       String?  @map("user_agent")
+  ipHash          String  @map("ip_hash") // HMAC, rate cap only
+  fingerprintHash String? @map("fingerprint_hash") // HMAC, primary guest identity
+  cookieToken     String? @map("cookie_token") // signed httpOnly, soft check
+  userAgent       String? @map("user_agent")
 
-  dedupeKey       String   @map("dedupe_key")
-  isValid         Boolean  @default(true) @map("is_valid")
-  createdAt       DateTime @default(now()) @map("created_at")
+  dedupeKey String     @map("dedupe_key")
+  choice    VoteChoice @map("choice")
+  isValid   Boolean    @default(true) @map("is_valid")
+  createdAt DateTime   @default(now()) @map("created_at")
 
   channel    Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
   submission Submission   @relation(fields: [submissionId], references: [id], onDelete: Cascade)
@@ -343,7 +351,7 @@ model BattleRound {
   id            String      @id @default(uuid())
   channelId     String      @map("channel_id")
   roundNumber   Int         @map("round_number")
-  name          String?     // e.g. "Ημιτελικοί"
+  name          String? // e.g. "Ημιτελικοί"
   status        RoundStatus @default(PENDING)
   votingStartAt DateTime?   @map("voting_start_at")
   votingEndAt   DateTime?   @map("voting_end_at")
@@ -383,7 +391,7 @@ model Matchup {
 model AuditLog {
   id          String   @id @default(uuid())
   actorUserId String?  @map("actor_user_id")
-  action      String   // e.g. "vote.cast", "submission.approve", "channel.transition", "member.join"
+  action      String // e.g. "vote.cast", "submission.approve", "channel.transition", "member.join"
   entityType  String   @map("entity_type")
   entityId    String   @map("entity_id")
   metadata    Json?

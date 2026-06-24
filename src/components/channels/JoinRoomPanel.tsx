@@ -15,6 +15,7 @@ type JoinRoomPanelProps = {
   joined: boolean;
   authenticated: boolean;
   allowGuestUploads: boolean;
+  allowGuestVotes: boolean;
   completed: boolean;
   participation?: Participation | null;
 };
@@ -85,6 +86,7 @@ export function JoinRoomPanel({
   joined,
   authenticated,
   allowGuestUploads,
+  allowGuestVotes,
   completed,
   participation = null,
 }: JoinRoomPanelProps) {
@@ -131,7 +133,7 @@ export function JoinRoomPanel({
       participation === "ARTIST"
         ? "You're in as an Artist — drop your track below."
         : participation === "JUDGE"
-          ? "You're judging this room — voting lands soon."
+          ? "You're judging this room — your W/L vote counts equally."
           : "You're running this room.";
 
     return (
@@ -202,7 +204,7 @@ export function JoinRoomPanel({
     );
   }
 
-  if (!allowGuestUploads) {
+  if (!allowGuestUploads && !allowGuestVotes) {
     const next = encodeURIComponent(`/c/${code}`);
 
     return (

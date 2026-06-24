@@ -47,6 +47,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       code: true,
       status: true,
       allowGuestUploads: true,
+      allowGuestVotes: true,
     },
   });
 
@@ -149,7 +150,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   }
 
-  if (!channel.allowGuestUploads) {
+  if (!channel.allowGuestUploads && !channel.allowGuestVotes) {
     return NextResponse.json(
       {
         error: "Sign in to join this room.",

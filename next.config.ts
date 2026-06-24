@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const isDev = process.env.NODE_ENV !== "production";
+const turnstileOrigin = "https://challenges.cloudflare.com";
 
 function storageOrigin(): string {
   const endpoint = process.env.S3_ENDPOINT;
@@ -15,7 +16,7 @@ function storageOrigin(): string {
 function contentSecurityPolicy(): string {
   const storage = storageOrigin();
 
-  const scriptSrc = ["'self'", "'unsafe-inline'"];
+  const scriptSrc = ["'self'", "'unsafe-inline'", turnstileOrigin];
   if (isDev) scriptSrc.push("'unsafe-eval'");
 
   const connectSrc = ["'self'"];
@@ -40,7 +41,7 @@ function contentSecurityPolicy(): string {
     `media-src ${mediaSrc.join(" ")}`,
     `connect-src ${connectSrc.join(" ")}`,
     `font-src 'self' data:`,
-    `frame-src https://open.spotify.com https://w.soundcloud.com`,
+    `frame-src https://open.spotify.com https://w.soundcloud.com ${turnstileOrigin}`,
   ];
 
   return directives.join("; ");

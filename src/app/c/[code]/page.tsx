@@ -15,6 +15,7 @@ import {
 import { SubmitTrackPanel } from "@/components/submissions/SubmitTrackPanel";
 import { TrackPlayer } from "@/components/submissions/TrackPlayer";
 import { buttonVariants } from "@/components/ui/button";
+import { VoteControl } from "@/components/voting/VoteControl";
 import {
   GUEST_COOKIE_NAME,
   readGuestToken,
@@ -85,7 +86,7 @@ export default async function ChannelRoomPage({ params }: PageProps) {
         })
       : null;
 
-  const [approvedSubmissions, mySubmission] = await Promise.all([
+  const [approvedSubmissions, mySubmission, ownVotes] = await Promise.all([
     prisma.submission.findMany({
       where: { channelId: channel.id, status: SubmissionStatus.APPROVED },
       orderBy: { createdAt: "desc" },
@@ -97,6 +98,8 @@ export default async function ChannelRoomPage({ params }: PageProps) {
         sourceType: true,
         externalUrl: true,
         mediaAssetId: true,
+        winCount: true,
+        lossCount: true,
       },
     }),
     membership
@@ -118,9 +121,31 @@ export default async function ChannelRoomPage({ params }: PageProps) {
           },
         })
       : null,
+    membership
+      ? prisma.vote.findMany({
+          where: {
+            channelId: channel.id,
+            isValid: true,
+            submission: { status: SubmissionStatus.APPROVED },
+            ...(user
+              ? { voterUserId: user.id }
+              : { cookieToken: guestToken }),
+          },
+          orderBy: { createdAt: "desc" },
+          select: { submissionId: true, choice: true },
+        })
+      : [],
   ]);
 
   const isOpen = channel.status === ChannelStatus.OPEN;
+  const choices = new Map<string, "WIN" | "LOSS">();
+  for (const vote of ownVotes) {
+    if (!choices.has(vote.submissionId)) {
+      choices.set(vote.submissionId, vote.choice);
+    }
+  }
+  const turnstileSiteKey =
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() || undefined;
 
   return (
     <main id="main-content" className="min-h-svh bg-background">
@@ -251,6 +276,20 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                         trackTitle={submission.trackTitle}
                         artistName={submission.artistName}
                       />
+                      <VoteControl
+                        code={channel.code}
+                        submissionId={submission.id}
+                        initialWinCount={submission.winCount}
+                        initialLossCount={submission.lossCount}
+                        initialChoice={choices.get(submission.id)}
+                        canVote={Boolean(membership && isOpen)}
+                        disabledReason={
+                          membership
+                            ? "Voting is available while this room is open."
+                            : "Join the room to cast a W or L."
+                        }
+                        turnstileSiteKey={turnstileSiteKey}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -269,6 +308,7 @@ export default async function ChannelRoomPage({ params }: PageProps) {
             joined={Boolean(membership)}
             authenticated={Boolean(user)}
             allowGuestUploads={channel.allowGuestUploads}
+            allowGuestVotes={channel.allowGuestVotes}
             completed={channel.status === ChannelStatus.COMPLETED}
             participation={membership?.participation ?? undefined}
           />
@@ -296,8 +336,8 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                 Judge seat
               </div>
               <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                You joined as a judge. Judges listen and decide — they don&apos;t
-                submit tracks. Voting tools land in a later drop.
+                You joined as a judge. Listen close and cast W or L on every
+                approved track. Every room member&apos;s vote counts equally.
               </p>
             </div>
           )}
