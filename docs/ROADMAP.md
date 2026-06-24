@@ -26,14 +26,16 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 - [x] **H02** → Postgres + `prisma migrate dev` (init) + Auth.js (host accounts) — ✅ reviewed
 - [x] **H03** → Channel create + join-by-code + membership — ✅ reviewed + 🔒 security pass
 - [x] **H01–H03 merged to `main`** (linear) 2026-06-24
-- [~] **H04** → Uploads (presigned) + submissions + host moderation + player — `docs/codex/handoff-04-uploads.md` (Copilot, in flight)
+- [x] **H04** → Uploads (presigned) + submissions + host moderation + player — ✅ reviewed + 🔒 security pass + merged (`598e4fc`)
+- [x] **H05** → Participant roles (Judge/Artist) + Moderator promotion — ✅ reviewed + 🔒 security pass + merged (`46cc8a0`)
+- [x] **H01–H05 merged to `main`** (linear, ff-only) 2026-06-24
 
 ### v1.1 features (locked 2026-06-24 — δες plan §1c)
 Judge/Artist participation · Moderators · Timers (auto-close+extend) · Notifications (in-app + web push).
-- [ ] **H05** → Participant roles (Judge/Artist) + Moderator promotion — `docs/codex/handoff-05-roles.md`
-- [ ] **H06** → Voting + anti-fraud + timers + countdown
-- [ ] **H07** → Notifications: web push (VAPID + SW) + in-app banners
-- [ ] **H08** → Results + battle bracket · **H09** → Stats · **H10** → Hardening (rate limits/CSP/worker)
+- [~] **H06** → Voting (**W/L** per track, live W% split, everyone votes) + anti-fraud — `docs/codex/handoff-06-voting.md` (queued)
+- [ ] **H07** → Timers (auto-close + extend) + live countdown
+- [ ] **H08** → Notifications: web push (VAPID + SW) + in-app banners
+- [ ] **H09** → Results + battle bracket · **H10** → Stats · **H11** → Hardening (rate limits/CSP/worker)
 
 ## Phase 2 — Core loop (MVP)
 - [ ] Organizer: create competition + review (approve/reject)
