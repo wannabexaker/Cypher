@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { canManageChannel } from "@/lib/channels";
 import { prisma } from "@/lib/prisma";
+import { sendChannelPush } from "@/lib/push";
 import { getCurrentUser } from "@/lib/session";
 import { channelTimerSchema } from "@/lib/validation/timer";
 
@@ -42,6 +43,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     where: { id: channelId },
     select: {
       id: true,
+      code: true,
+      name: true,
       hostId: true,
       status: true,
       votingOpenedAt: true,
@@ -111,6 +114,31 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     return next;
   });
+
+  // Fire-and-forget: notify room members of the voting event. Push is
+  // best-effort (and a no-op without VAPID keys); never block or fail the
+  // response on it.
+  const roomUrl = `/c/${channel.code}`;
+  const payload =
+    input.action === "close"
+      ? {
+          title: channel.name,
+          body: "Voting has closed.",
+          url: roomUrl,
+          tag: `voting-${channel.id}`,
+        }
+      : {
+          title: channel.name,
+          body: updated.votingClosesAt
+            ? `Voting is open — closes ${updated.votingClosesAt.toLocaleTimeString(
+                "en-GB",
+                { hour: "2-digit", minute: "2-digit" },
+              )}.`
+            : "Voting is open.",
+          url: roomUrl,
+          tag: `voting-${channel.id}`,
+        };
+  void sendChannelPush(channel.id, payload);
 
   return NextResponse.json({
     votingOpenedAt: updated.votingOpenedAt,

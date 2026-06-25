@@ -218,16 +218,37 @@ model Channel {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  host         User            @relation("HostChannels", fields: [hostId], references: [id])
-  members      ChannelMember[]
-  submissions  Submission[]
-  votes        Vote[]
-  battleRounds BattleRound[]
+  host              User               @relation("HostChannels", fields: [hostId], references: [id])
+  members           ChannelMember[]
+  submissions       Submission[]
+  votes             Vote[]
+  battleRounds      BattleRound[]
+  pushSubscriptions PushSubscription[]
 
   @@index([status])
   @@index([hostId])
   @@index([visibility, status])
   @@map("channels")
+}
+
+// H08 web push: a browser PushManager subscription scoped to one room and one
+// member (registered user or signed guest). Endpoint is globally unique so a
+// re-subscribe upserts rather than duplicating.
+model PushSubscription {
+  id         String   @id @default(uuid())
+  channelId  String   @map("channel_id")
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  userId     String?  @map("user_id") // null for guests
+  guestToken String?  @map("guest_token") // null for registered users
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([channelId])
+  @@map("push_subscriptions")
 }
 
 // A participant in a room. Either a registered user OR a lightweight guest (token + display name).

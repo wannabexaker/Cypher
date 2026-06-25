@@ -8,6 +8,8 @@ import { Gavel, ListMusic, Radio, Users } from "lucide-react";
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { JoinRoomPanel } from "@/components/channels/JoinRoomPanel";
+import { PushOptIn } from "@/components/notifications/PushOptIn";
+import { RoomBanner } from "@/components/notifications/RoomBanner";
 import {
   SubmissionStatusPill,
   type SubmissionStatusValue,
@@ -157,6 +159,8 @@ export default async function ChannelRoomPage({ params }: PageProps) {
   }
   const turnstileSiteKey =
     process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() || undefined;
+  const vapidPublicKey =
+    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim() || undefined;
 
   return (
     <main id="main-content" className="min-h-svh bg-background">
@@ -224,6 +228,12 @@ export default async function ChannelRoomPage({ params }: PageProps) {
           </div>
         </div>
       </section>
+
+      {channel.votingClosesAt && (
+        <div className="section-shell pt-6">
+          <RoomBanner closesAt={channel.votingClosesAt.toISOString()} />
+        </div>
+      )}
 
       <div className="section-shell grid gap-8 py-10 lg:grid-cols-[minmax(0,1fr)_24rem] lg:py-14">
         <div>
@@ -327,6 +337,12 @@ export default async function ChannelRoomPage({ params }: PageProps) {
             completed={channel.status === ChannelStatus.COMPLETED}
             participation={membership?.participation ?? undefined}
           />
+
+          {membership && vapidPublicKey && (
+            <div className="mt-6">
+              <PushOptIn code={channel.code} vapidPublicKey={vapidPublicKey} />
+            </div>
+          )}
 
           {membership && isOpen && membership.participation === "ARTIST" && (
             <div className="mt-6">
