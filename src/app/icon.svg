@@ -1,0 +1,21 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cypher">
+  <defs>
+    <linearGradient id="cy" x1="6" y1="26" x2="26" y2="6" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff2e97"/>
+      <stop offset="0.5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <filter id="gl" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="0.7" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="#08080c"/>
+  <rect x="0.6" y="0.6" width="30.8" height="30.8" rx="6.4" fill="none" stroke="#8b5cf6" stroke-opacity="0.35"/>
+  <g filter="url(#gl)" fill="url(#cy)">
+    <rect x="6.5"  y="11" width="3.2" height="10" rx="1.6"/>
+    <rect x="12.4" y="6"  width="3.2" height="20" rx="1.6"/>
+    <rect x="18.3" y="9"  width="3.2" height="14" rx="1.6"/>
+    <rect x="24.2" y="4"  width="3.2" height="24" rx="1.6"/>
+  </g>
+</svg>
