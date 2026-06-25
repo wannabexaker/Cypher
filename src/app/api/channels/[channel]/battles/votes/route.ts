@@ -1,6 +1,7 @@
 import {
   ChannelStatus,
-  SubmissionStatus,
+  MatchupStatus,
+  RoundStatus,
 } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
@@ -14,8 +15,8 @@ import {
   resolveChannelIdentity,
 } from "@/lib/membership";
 import { prisma } from "@/lib/prisma";
+import { castBattleVoteSchema } from "@/lib/validation/battle";
 import { channelCodeSchema } from "@/lib/validation/channels";
-import { castVoteSchema } from "@/lib/validation/votes";
 import { getVoteSplit } from "@/lib/votes";
 
 export const runtime = "nodejs";
@@ -39,43 +40,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Invalid vote details." }, { status: 400 });
   }
 
-  const parsed = castVoteSchema.safeParse(body);
+  const parsed = castBattleVoteSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid vote details." }, { status: 400 });
   }
 
   const channel = await prisma.channel.findUnique({
     where: { code: parsedCode.data },
-    select: { id: true, status: true, votingClosesAt: true },
+    select: { id: true, status: true },
   });
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
   }
-  if (channel.status !== ChannelStatus.OPEN) {
+  if (channel.status !== ChannelStatus.BATTLE) {
     return NextResponse.json(
-      { error: "Voting is only open while the room is open." },
+      { error: "Battle voting is only open while the room is in battle mode." },
       { status: 409 },
-    );
-  }
-  if (channel.votingClosesAt && Date.now() >= channel.votingClosesAt.getTime()) {
-    return NextResponse.json(
-      { error: "Voting has closed for this room." },
-      { status: 409 },
-    );
-  }
-
-  const submission = await prisma.submission.findFirst({
-    where: {
-      id: parsed.data.submissionId,
-      channelId: channel.id,
-      status: SubmissionStatus.APPROVED,
-    },
-    select: { id: true },
-  });
-  if (!submission) {
-    return NextResponse.json(
-      { error: "Approved track not found." },
-      { status: 404 },
     );
   }
 
@@ -88,8 +68,45 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  // TODO(H09): optional self-vote guard.
-  // TODO(H11): replace the basic DB IP cap with a Redis sliding window.
+  const matchup = await prisma.matchup.findUnique({
+    where: { id: parsed.data.matchupId },
+    select: {
+      id: true,
+      status: true,
+      roundId: true,
+      submissionAId: true,
+      submissionBId: true,
+      round: {
+        select: {
+          channelId: true,
+          status: true,
+        },
+      },
+    },
+  });
+  if (!matchup || matchup.round.channelId !== channel.id) {
+    return NextResponse.json({ error: "Matchup not found." }, { status: 404 });
+  }
+
+  if (
+    matchup.status !== MatchupStatus.VOTING_OPEN ||
+    matchup.round.status !== RoundStatus.VOTING_OPEN
+  ) {
+    return NextResponse.json(
+      { error: "Voting is closed for this matchup." },
+      { status: 409 },
+    );
+  }
+
+  if (
+    parsed.data.submissionId !== matchup.submissionAId &&
+    parsed.data.submissionId !== matchup.submissionBId
+  ) {
+    return NextResponse.json(
+      { error: "Track does not belong to this matchup." },
+      { status: 400 },
+    );
+  }
 
   try {
     const result = await castWlVote({
@@ -97,27 +114,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
       identity,
       membershipId: membership.id,
       channelId: channel.id,
-      submissionId: submission.id,
+      roundId: matchup.roundId,
+      matchupId: matchup.id,
+      submissionId: parsed.data.submissionId,
       choice: parsed.data.choice,
       fingerprint: parsed.data.fingerprint,
       turnstileToken: parsed.data.turnstileToken,
       dedupeKeyForIdentity: (identityKey) =>
-        `ch:${channel.id}:s:${submission.id}:${identityKey}`,
-      updateAfterVote: async (transaction, counts) => {
-        await transaction.submission.update({
-          where: { id: submission.id },
-          data: {
-            winCount: counts.winCount,
-            lossCount: counts.lossCount,
-            voteCount: counts.total,
-          },
-        });
-      },
+        `m:${matchup.id}:s:${parsed.data.submissionId}:${identityKey}`,
+      tallyWhere: { matchupId: matchup.id },
     });
 
     return NextResponse.json(
       {
-        submissionId: submission.id,
+        matchupId: matchup.id,
+        submissionId: parsed.data.submissionId,
         winCount: result.winCount,
         lossCount: result.lossCount,
         total: result.total,
@@ -140,7 +151,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    console.error("Vote cast failed", error);
+    console.error("Battle vote cast failed", error);
     return NextResponse.json(
       { error: "Unable to record this vote right now." },
       { status: 500 },

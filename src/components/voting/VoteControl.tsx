@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useReducedMotion } from "framer-motion";
-import { LoaderCircle, EyeOff, ShieldCheck } from "lucide-react";
+import { EyeOff, LoaderCircle, ShieldCheck } from "lucide-react";
 import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
 
@@ -43,10 +43,10 @@ type VoteControlProps = {
   canVote: boolean;
   disabledReason?: string;
   turnstileSiteKey?: string;
-  // When false, the crowd verdict (bar + W/L%) is hidden per results-visibility;
-  // the W/L buttons still work while voting is open.
   showCounts?: boolean;
   countsHiddenLabel?: string;
+  votePath?: string;
+  extraPayload?: Record<string, string>;
 };
 
 type VoteResponse = {
@@ -67,6 +67,8 @@ export function VoteControl({
   turnstileSiteKey,
   showCounts = true,
   countsHiddenLabel,
+  votePath,
+  extraPayload,
 }: VoteControlProps) {
   const reduceMotion = useReducedMotion();
   const [winCount, setWinCount] = useState(initialWinCount);
@@ -117,7 +119,7 @@ export function VoteControl({
     [],
   );
 
-  async function castVote(nextChoice: VoteChoice) {
+  async function cast(nextChoice: VoteChoice) {
     if (
       !canVote ||
       pending ||
@@ -131,12 +133,13 @@ export function VoteControl({
     setMessage("");
 
     try {
-      const response = await fetch(`/api/channels/${code}/votes`, {
+      const response = await fetch(votePath ?? `/api/channels/${code}/votes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           submissionId,
           choice: nextChoice,
+          ...(extraPayload ?? {}),
           ...(turnstileToken ? { turnstileToken } : {}),
         }),
       });
@@ -241,7 +244,7 @@ export function VoteControl({
             choice === "WIN" ||
             (needsTurnstile && !turnstileToken)
           }
-          onClick={() => void castVote("WIN")}
+          onClick={() => void cast("WIN")}
         >
           {pending ? <LoaderCircle className="motion-safe:animate-spin" /> : "W"}
           Win
@@ -260,7 +263,7 @@ export function VoteControl({
             choice === "LOSS" ||
             (needsTurnstile && !turnstileToken)
           }
-          onClick={() => void castVote("LOSS")}
+          onClick={() => void cast("LOSS")}
         >
           {pending ? <LoaderCircle className="motion-safe:animate-spin" /> : "L"}
           Loss

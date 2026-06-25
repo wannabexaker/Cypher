@@ -4,16 +4,20 @@ import { notFound } from "next/navigation";
 import { SubmissionStatus } from "@prisma/client";
 import {
   ArrowLeft,
+  Flag,
   CalendarClock,
   Crown,
   ExternalLink,
   ListChecks,
   Music2,
   Radio,
+  Swords,
   Timer,
   Users,
 } from "lucide-react";
 
+import { ChannelBattleCreateControl } from "@/components/channels/ChannelBattleCreateControl";
+import { ChannelBattleRoundCloseControl } from "@/components/channels/ChannelBattleRoundCloseControl";
 import { ChannelFinalizeControl } from "@/components/channels/ChannelFinalizeControl";
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { ChannelStatusControl } from "@/components/channels/ChannelStatusControl";
@@ -104,6 +108,33 @@ export default async function ManageChannelPage({ params }: PageProps) {
       where: { channelId: channel.id, status: SubmissionStatus.REJECTED },
     }),
   ]);
+
+  const openBattleRound =
+    channel.status === "BATTLE"
+      ? await prisma.battleRound.findFirst({
+          where: {
+            channelId: channel.id,
+            status: "VOTING_OPEN",
+          },
+          orderBy: { roundNumber: "asc" },
+          select: {
+            id: true,
+            roundNumber: true,
+            matchups: {
+              orderBy: { id: "asc" },
+              select: {
+                id: true,
+                submissionA: {
+                  select: { id: true, trackTitle: true },
+                },
+                submissionB: {
+                  select: { id: true, trackTitle: true },
+                },
+              },
+            },
+          },
+        })
+      : null;
 
   const approvedCount = approvedTracks.length;
 
@@ -278,6 +309,61 @@ export default async function ManageChannelPage({ params }: PageProps) {
                 tracks={rankedApprovedTracks}
                 championLabel={championLabel}
               />
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-7">
+            <div className="flex items-center gap-3">
+              <Swords className="size-5 text-cyan" />
+              <h2 className="text-2xl font-bold text-foreground">
+                Battle bracket
+              </h2>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Start single-elimination from the top qualifying tracks, then
+              close each round to advance winners until one champion remains.
+            </p>
+
+            <div className="mt-6 space-y-6">
+              {channel.status === "OPEN" && (
+                <div>
+                  <p className="font-mono text-[0.6875rem] font-bold tracking-[0.14em] text-muted-foreground uppercase">
+                    Create bracket
+                  </p>
+                  <div className="mt-3">
+                    <ChannelBattleCreateControl
+                      channelId={channel.id}
+                      status={channel.status}
+                      approvedCount={approvedCount}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {channel.status === "BATTLE" && (
+                <div>
+                  <p className="font-mono text-[0.6875rem] font-bold tracking-[0.14em] text-muted-foreground uppercase">
+                    Close round
+                  </p>
+                  <div className="mt-3">
+                    <ChannelBattleRoundCloseControl
+                      channelId={channel.id}
+                      status={channel.status}
+                      openRound={openBattleRound}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {(channel.status === "BATTLE" || channel.status === "COMPLETED") && (
+                <Link
+                  href={`/c/${channel.code}/battle`}
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                >
+                  <Flag />
+                  Open battle board
+                </Link>
+              )}
             </div>
           </section>
 

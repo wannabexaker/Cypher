@@ -73,6 +73,9 @@ export default async function ChannelRoomPage({ params }: PageProps) {
   });
 
   if (!channel) notFound();
+  if (channel.status === ChannelStatus.BATTLE) {
+    redirect(`/c/${channel.code}/battle`);
+  }
 
   const membership = user
     ? await prisma.channelMember.findUnique({
