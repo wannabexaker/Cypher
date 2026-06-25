@@ -1,10 +1,15 @@
-import { ChannelStatus, SubmissionStatus } from "@prisma/client";
+import {
+  ChannelStatus,
+  ResultsVisibility,
+  SubmissionStatus,
+} from "@prisma/client";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Gavel, ListMusic, Radio, Users } from "lucide-react";
+import { Crown, Gavel, ListMusic, Radio, Users } from "lucide-react";
 
+import { ChampionBanner } from "@/components/channels/ChampionBanner";
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { JoinRoomPanel } from "@/components/channels/JoinRoomPanel";
@@ -25,7 +30,9 @@ import {
 } from "@/lib/guest-session";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { canManageChannel } from "@/lib/channels";
 import { channelCodeSchema } from "@/lib/validation/channels";
+import { compareWinRatio, getVoteSplit } from "@/lib/votes";
 
 export const metadata: Metadata = {
   title: "Channel room",
@@ -141,6 +148,7 @@ export default async function ChannelRoomPage({ params }: PageProps) {
   ]);
 
   const isOpen = channel.status === ChannelStatus.OPEN;
+  const completed = channel.status === ChannelStatus.COMPLETED;
   const votingClosed = Boolean(
     channel.votingClosesAt &&
       channel.votingClosesAt.getTime() <= Date.now(),
@@ -151,6 +159,42 @@ export default async function ChannelRoomPage({ params }: PageProps) {
     : membership
       ? "Voting is available while this room is open."
       : "Join the room to cast a W or L.";
+
+  // Results-visibility gate (mirrors the results route). The host, channel
+  // MODERATORs, and platform ADMINs always see counts to run the room.
+  const isHostOrModerator =
+    membership?.role === "HOST" ||
+    membership?.role === "MODERATOR" ||
+    Boolean(user && canManageChannel(user, channel));
+  const canSeeCounts =
+    channel.resultsVisibility === ResultsVisibility.LIVE ||
+    (channel.resultsVisibility === ResultsVisibility.AFTER_CLOSE &&
+      (votingClosed || completed)) ||
+    (channel.resultsVisibility === ResultsVisibility.HIDDEN && completed) ||
+    isHostOrModerator;
+  const countsHiddenLabel =
+    channel.resultsVisibility === ResultsVisibility.HIDDEN
+      ? "Results reveal when the host finalizes the room."
+      : "Results reveal when voting closes.";
+
+  // Freeze the final leaderboard by W% once the room is COMPLETED; otherwise
+  // keep the host's newest-first submission order.
+  const rankedSubmissions = completed
+    ? [...approvedSubmissions].sort((a, b) => {
+        const ratioOrder = compareWinRatio(b, a);
+        if (ratioOrder !== 0) return ratioOrder;
+        return b.winCount + b.lossCount - (a.winCount + a.lossCount);
+      })
+    : approvedSubmissions;
+
+  const champion =
+    completed && channel.championSubmissionId
+      ? approvedSubmissions.find(
+          (submission) => submission.id === channel.championSubmissionId,
+        )
+      : undefined;
+  const championSplit = champion ? getVoteSplit(champion) : null;
+
   const choices = new Map<string, "WIN" | "LOSS">();
   for (const vote of ownVotes) {
     if (!choices.has(vote.submissionId)) {
@@ -229,6 +273,18 @@ export default async function ChannelRoomPage({ params }: PageProps) {
         </div>
       </section>
 
+      {champion && championSplit && (
+        <div className="section-shell pt-6">
+          <ChampionBanner
+            artistName={champion.artistName}
+            trackTitle={champion.trackTitle}
+            winPct={championSplit.winPct}
+            total={championSplit.total}
+            completedAt={channel.completedAt}
+          />
+        </div>
+      )}
+
       {channel.votingClosesAt && (
         <div className="section-shell pt-6">
           <RoomBanner closesAt={channel.votingClosesAt.toISOString()} />
@@ -280,43 +336,67 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                 </p>
               ) : (
                 <ul className="mt-5 grid gap-4">
-                  {approvedSubmissions.map((submission) => (
-                    <li
-                      key={submission.id}
-                      className="rounded-lg border border-border bg-background p-4"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="font-bold text-foreground">
-                          {submission.artistName} — {submission.trackTitle}
-                        </p>
-                        <span className="font-mono text-[0.625rem] font-bold tracking-[0.12em] text-cyan uppercase">
-                          {submission.sourceType}
-                        </span>
-                      </div>
-                      {submission.description && (
-                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-                          {submission.description}
-                        </p>
-                      )}
-                      <TrackPlayer
-                        sourceType={submission.sourceType}
-                        mediaAssetId={submission.mediaAssetId}
-                        externalUrl={submission.externalUrl}
-                        trackTitle={submission.trackTitle}
-                        artistName={submission.artistName}
-                      />
-                      <VoteControl
-                        code={channel.code}
-                        submissionId={submission.id}
-                        initialWinCount={submission.winCount}
-                        initialLossCount={submission.lossCount}
-                        initialChoice={choices.get(submission.id)}
-                        canVote={canVote}
-                        disabledReason={voteDisabledReason}
-                        turnstileSiteKey={turnstileSiteKey}
-                      />
-                    </li>
-                  ))}
+                  {rankedSubmissions.map((submission, index) => {
+                    const isChampion =
+                      completed &&
+                      submission.id === channel.championSubmissionId;
+                    return (
+                      <li
+                        key={submission.id}
+                        className={`rounded-lg border bg-background p-4 ${
+                          isChampion
+                            ? "border-lime/50 shadow-glow-cyan"
+                            : "border-border"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="flex items-center gap-2 font-bold text-foreground">
+                            {completed && (
+                              <span className="font-mono text-xs text-muted-foreground">
+                                #{index + 1}
+                              </span>
+                            )}
+                            {submission.artistName} — {submission.trackTitle}
+                            {isChampion && (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-lime/30 bg-lime/10 px-2 py-0.5 font-mono text-[0.625rem] font-bold tracking-[0.12em] text-lime uppercase">
+                                <Crown className="size-3" aria-hidden="true" />
+                                Champion
+                              </span>
+                            )}
+                          </p>
+                          <span className="font-mono text-[0.625rem] font-bold tracking-[0.12em] text-cyan uppercase">
+                            {submission.sourceType}
+                          </span>
+                        </div>
+                        {submission.description && (
+                          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                            {submission.description}
+                          </p>
+                        )}
+                        <TrackPlayer
+                          sourceType={submission.sourceType}
+                          mediaAssetId={submission.mediaAssetId}
+                          externalUrl={submission.externalUrl}
+                          trackTitle={submission.trackTitle}
+                          artistName={submission.artistName}
+                        />
+                        <VoteControl
+                          code={channel.code}
+                          submissionId={submission.id}
+                          initialWinCount={submission.winCount}
+                          initialLossCount={submission.lossCount}
+                          initialChoice={choices.get(submission.id)}
+                          canVote={canVote}
+                          disabledReason={voteDisabledReason}
+                          turnstileSiteKey={turnstileSiteKey}
+                          showCounts={canSeeCounts}
+                          countsHiddenLabel={
+                            canSeeCounts ? undefined : countsHiddenLabel
+                          }
+                        />
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </section>

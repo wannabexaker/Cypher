@@ -208,6 +208,10 @@ model Channel {
   votingOpenedAt DateTime? @map("voting_opened_at") // set when the host first arms a window
   votingClosesAt DateTime? @map("voting_closes_at") // the armed deadline; null = no timer
 
+  // H09 finalize: the host crowns a champion and freezes the room.
+  championSubmissionId String?   @map("champion_submission_id") // winning track once COMPLETED
+  completedAt          DateTime? @map("completed_at") // when the host finalized the room
+
   resultsVisibility  ResultsVisibility @default(AFTER_CLOSE) @map("results_visibility")
   voteScope          VoteScope         @default(PER_SUBMISSION) @map("vote_scope")
   maxVotesPerVoter   Int               @default(1) @map("max_votes_per_voter")
@@ -219,6 +223,7 @@ model Channel {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   host              User               @relation("HostChannels", fields: [hostId], references: [id])
+  champion          Submission?        @relation("ChannelChampion", fields: [championSubmissionId], references: [id])
   members           ChannelMember[]
   submissions       Submission[]
   votes             Vote[]
@@ -296,6 +301,7 @@ model Submission {
   createdAt         DateTime         @default(now()) @map("created_at")
 
   channel         Channel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  championOf      Channel[]     @relation("ChannelChampion")
   submitterMember ChannelMember @relation(fields: [submitterMemberId], references: [id])
   reviewedBy      User?         @relation("ReviewedBy", fields: [reviewedById], references: [id])
   mediaAsset      MediaAsset?   @relation(fields: [mediaAssetId], references: [id])

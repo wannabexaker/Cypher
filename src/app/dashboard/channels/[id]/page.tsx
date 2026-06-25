@@ -5,6 +5,7 @@ import { SubmissionStatus } from "@prisma/client";
 import {
   ArrowLeft,
   CalendarClock,
+  Crown,
   ExternalLink,
   ListChecks,
   Music2,
@@ -13,6 +14,7 @@ import {
   Users,
 } from "lucide-react";
 
+import { ChannelFinalizeControl } from "@/components/channels/ChannelFinalizeControl";
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { ChannelStatusControl } from "@/components/channels/ChannelStatusControl";
 import { ChannelTimerControl } from "@/components/channels/ChannelTimerControl";
@@ -24,6 +26,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { canManageChannel } from "@/lib/channels";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
+import { compareWinRatio, getVoteSplit } from "@/lib/votes";
 
 export const metadata: Metadata = {
   title: "Manage channel",
@@ -51,6 +54,8 @@ export default async function ManageChannelPage({ params }: PageProps) {
       allowGuestUploads: true,
       status: true,
       hostId: true,
+      championSubmissionId: true,
+      completedAt: true,
       votingOpenedAt: true,
       votingClosesAt: true,
       members: {
@@ -68,7 +73,7 @@ export default async function ManageChannelPage({ params }: PageProps) {
 
   if (!channel || !canManageChannel(user, channel)) notFound();
 
-  const [pendingSubmissions, approvedCount, rejectedCount] = await Promise.all([
+  const [pendingSubmissions, approvedTracks, rejectedCount] = await Promise.all([
     prisma.submission.findMany({
       where: { channelId: channel.id, status: SubmissionStatus.PENDING },
       orderBy: { createdAt: "asc" },
@@ -84,13 +89,47 @@ export default async function ManageChannelPage({ params }: PageProps) {
         submitterMember: { select: { displayName: true } },
       },
     }),
-    prisma.submission.count({
+    prisma.submission.findMany({
       where: { channelId: channel.id, status: SubmissionStatus.APPROVED },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        artistName: true,
+        trackTitle: true,
+        winCount: true,
+        lossCount: true,
+      },
     }),
     prisma.submission.count({
       where: { channelId: channel.id, status: SubmissionStatus.REJECTED },
     }),
   ]);
+
+  const approvedCount = approvedTracks.length;
+
+  // Rank approved tracks by W% so the host tie-picker mirrors the finalize
+  // route ordering; labels/splits power the "Crown winner" panel.
+  const rankedApprovedTracks = [...approvedTracks]
+    .sort((a, b) => {
+      const ratioOrder = compareWinRatio(b, a);
+      if (ratioOrder !== 0) return ratioOrder;
+      return b.winCount + b.lossCount - (a.winCount + a.lossCount);
+    })
+    .map((track) => {
+      const split = getVoteSplit(track);
+      return {
+        id: track.id,
+        label: `${track.artistName} — ${track.trackTitle}`,
+        winPct: split.winPct,
+        total: split.total,
+      };
+    });
+
+  const championLabel = channel.championSubmissionId
+    ? (rankedApprovedTracks.find(
+        (track) => track.id === channel.championSubmissionId,
+      )?.label ?? null)
+    : null;
 
   const moderationQueue = pendingSubmissions.map((submission) => ({
     id: submission.id,
@@ -216,6 +255,28 @@ export default async function ManageChannelPage({ params }: PageProps) {
                 channelId={channel.id}
                 status={channel.status}
                 closesAt={channel.votingClosesAt?.toISOString() ?? null}
+              />
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-7">
+            <div className="flex items-center gap-3">
+              <Crown className="size-5 text-lime" />
+              <h2 className="text-2xl font-bold text-foreground">
+                Crown winner
+              </h2>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Finalize the room to rank approved tracks by W% and crown a
+              champion. On a tie at the top you pick the winner. This locks
+              voting and freezes results.
+            </p>
+            <div className="mt-6">
+              <ChannelFinalizeControl
+                channelId={channel.id}
+                status={channel.status}
+                tracks={rankedApprovedTracks}
+                championLabel={championLabel}
               />
             </div>
           </section>

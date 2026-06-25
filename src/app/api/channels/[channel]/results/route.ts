@@ -1,6 +1,11 @@
-import { SubmissionStatus } from "@prisma/client";
+import {
+  ChannelStatus,
+  ResultsVisibility,
+  SubmissionStatus,
+} from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
+import { canManageChannel } from "@/lib/channels";
 import {
   findChannelMembership,
   resolveChannelIdentity,
@@ -30,6 +35,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     where: { code: parsedCode.data },
     select: {
       id: true,
+      hostId: true,
+      status: true,
+      resultsVisibility: true,
+      completedAt: true,
+      championSubmissionId: true,
       votingClosesAt: true,
       submissions: {
         where: { status: SubmissionStatus.APPROVED },
@@ -69,7 +79,29 @@ export async function GET(request: NextRequest, context: RouteContext) {
     choices[vote.submissionId] ??= vote.choice;
   }
 
-  const results = channel.submissions
+  const completed = channel.status === ChannelStatus.COMPLETED;
+  const votingClosed = Boolean(
+    channel.votingClosesAt && Date.now() >= channel.votingClosesAt.getTime(),
+  );
+
+  // The host, a platform ADMIN, and channel MODERATORs run the room, so they
+  // always see live counts regardless of the visibility setting.
+  const callerIsHostOrModerator =
+    membership?.role === "HOST" ||
+    membership?.role === "MODERATOR" ||
+    Boolean(
+      identity.user &&
+        canManageChannel(identity.user, { hostId: channel.hostId }),
+    );
+
+  const canSeeCounts =
+    channel.resultsVisibility === ResultsVisibility.LIVE ||
+    (channel.resultsVisibility === ResultsVisibility.AFTER_CLOSE &&
+      (votingClosed || completed)) ||
+    (channel.resultsVisibility === ResultsVisibility.HIDDEN && completed) ||
+    callerIsHostOrModerator;
+
+  const ranked = channel.submissions
     .map((submission) => ({
       submissionId: submission.id,
       trackTitle: submission.trackTitle,
@@ -79,6 +111,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
       ...getVoteSplit(submission),
     }))
     .sort((a, b) => {
+      // When counts are hidden, never leak the ranking order either — fall back
+      // to a stable submission order (earliest first).
+      if (!canSeeCounts) return a.createdAt.getTime() - b.createdAt.getTime();
       const ratioOrder = compareWinRatio(b, a);
       if (ratioOrder !== 0) return ratioOrder;
       if (b.total !== a.total) return b.total - a.total;
@@ -86,14 +121,45 @@ export async function GET(request: NextRequest, context: RouteContext) {
     });
 
   const tiedSubmissionIds =
-    results.length > 1
-      ? results
-          .filter((result) => hasSameWinRatio(result, results[0]))
+    canSeeCounts && ranked.length > 1
+      ? ranked
+          .filter((result) => hasSameWinRatio(result, ranked[0]))
           .map((result) => result.submissionId)
       : [];
 
+  const base = {
+    status: channel.status,
+    completed,
+    completedAt: channel.completedAt,
+    championSubmissionId: channel.championSubmissionId,
+    votingClosesAt: channel.votingClosesAt,
+    votingClosed,
+    choices,
+  };
+
+  if (!canSeeCounts) {
+    const reason =
+      channel.resultsVisibility === ResultsVisibility.HIDDEN
+        ? "Results reveal when the host finalizes the room."
+        : "Results reveal when voting closes.";
+
+    return NextResponse.json({
+      ...base,
+      resultsHidden: true,
+      reason,
+      results: ranked.map((result) => ({
+        submissionId: result.submissionId,
+        trackTitle: result.trackTitle,
+      })),
+      tie: false,
+      tiedSubmissionIds: [],
+    });
+  }
+
   return NextResponse.json({
-    results: results.map((result) => ({
+    ...base,
+    resultsHidden: false,
+    results: ranked.map((result) => ({
       submissionId: result.submissionId,
       trackTitle: result.trackTitle,
       winCount: result.winCount,
@@ -102,13 +168,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
       winPct: result.winPct,
     })),
     tie: tiedSubmissionIds.length > 1,
-    tiedSubmissionIds:
-      tiedSubmissionIds.length > 1 ? tiedSubmissionIds : [],
-    choices,
-    votingClosesAt: channel.votingClosesAt,
-    votingClosed: Boolean(
-      channel.votingClosesAt &&
-        Date.now() >= channel.votingClosesAt.getTime(),
-    ),
+    tiedSubmissionIds: tiedSubmissionIds.length > 1 ? tiedSubmissionIds : [],
   });
 }
