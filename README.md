@@ -1,139 +1,115 @@
 # Cypher
 
-Next.js platform for online rap/trap competitions and battle rooms.
+Online rap/trap music competitions and battles where the crowd decides the winner
 
-> Drop your bars. The crowd decides.
+## Overview
 
-Current implementation:
+Cypher runs music competitions as rooms ("channels"). A host opens a channel and shares a join code; artists drop tracks, the crowd votes win/loss on each track, and the host either crowns the highest-rated track or runs a single-elimination battle bracket to a champion. Voting is open to guests, so the vote path is built around anti-fraud (hashed IP and fingerprint, a database-enforced dedupe key, a per-IP cap, and optional captcha) rather than requiring accounts. PostgreSQL is the source of truth for votes; object storage holds the audio.
 
-- H01: landing page, motion system, mock live channels, and design tokens
-- H02: PostgreSQL/Prisma wiring, host authentication, and gated dashboard shell
-- H03: channel creation, host management, join codes, and registered/guest membership
+## Features
 
-Uploads, voting, real battles, and public discovery remain intentionally out of scope until later handoffs.
+- Channels with shareable six-character join codes; join as a registered user or a guest (name only, via a signed httpOnly cookie)
+- Participation roles per channel: Artist (submits a track), Judge (votes), plus host-granted Moderators
+- Audio submissions by presigned upload (MP3/WAV, verified by magic bytes) or SoundCloud/Spotify embed, with host approve/reject moderation
+- Win/Loss voting per track with a live W%/L% split; one vote per identity per track, changeable until voting closes
+- Anti-fraud vote pipeline: HMAC-hashed IP and fingerprint, a unique `dedupeKey` enforced by the database, a per-IP cap, optional Cloudflare Turnstile, and a serializable write
+- Host-armed voting window: arm/extend/close a deadline with a live countdown; votes lock at the deadline
+- Web push notifications (VAPID + service worker) and in-app banners on voting events
+- Results finalization with a crowned champion, host tie-break, and per-channel results visibility (`LIVE`, `AFTER_CLOSE`, `HIDDEN`)
+- Single-elimination battle bracket: top-K seeding by win ratio, per-matchup W/L voting, round advancement to a champion
+- Audit log for votes, moderation, and channel lifecycle actions
 
-## Requirements
+## Architecture
 
-- Node.js 22 LTS
-- pnpm 10
-- Docker with Compose
+A single Next.js App Router application. Pages are server components; the API is route handlers under `src/app/api`. Prisma talks to PostgreSQL, which is authoritative for channels, submissions, votes, and battle state. Audio lives in S3-compatible object storage and is served through short-lived signed URLs. Vote uniqueness is enforced by a database unique constraint on a per-context dedupe key, not by application code, so concurrent and replayed votes collapse to one row.
 
-## Local development
+### Components
 
-Create your local environment file:
+| Component | Role |
+|---|---|
+| `src/app/api/channels/[channel]/*` | Channel lifecycle: join, submissions, votes, timer, results, finalize, battles, push |
+| `src/lib/cast-wl-vote.ts` | Shared W/L vote pipeline (hashing, captcha, IP cap, serializable upsert, audit) used by qualifying and battle votes |
+| `src/lib/battles.ts` | Battle bracket state and per-matchup tally computed from votes |
+| `src/lib/membership.ts` | Resolves voter identity (user or guest token) and channel membership |
+| `src/lib/storage.ts`, `src/lib/media.ts` | Presigned upload/download and MIME/magic-byte verification |
+| `prisma/schema.prisma` | Data model and migrations |
+
+## Tech Stack
+
+| Technology | Role |
+|---|---|
+| Next.js 15 (App Router, Turbopack) | Server rendering and API routes |
+| React 19, TypeScript (strict) | UI runtime and language |
+| Tailwind CSS 4 + shadcn/ui, Framer Motion | Styling and motion |
+| Prisma 6 + PostgreSQL 16 | ORM and primary datastore |
+| Auth.js v5 (credentials + Google), Argon2id, Zod | Auth, password hashing, validation |
+| AWS SDK v3 + S3-compatible storage (MinIO / Cloudflare R2) | Audio storage via presigned URLs |
+| web-push (VAPID) | Browser push notifications |
+| Cloudflare Turnstile | Optional vote captcha |
+| pnpm 10, Node 22 | Package manager and runtime |
+| Docker Compose | Local PostgreSQL + MinIO |
+
+## Installation
 
 ```bash
+git clone https://github.com/wannabexaker/Cypher.git
+cd Cypher
+pnpm install
 cp .env.example .env
 ```
 
-PowerShell:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Generate `AUTH_SECRET` and replace the placeholder:
+Fill `AUTH_SECRET` in `.env` with a real value:
 
 ```bash
 openssl rand -base64 33
 ```
 
-Start PostgreSQL, apply the committed migration, and run the app:
+Start PostgreSQL and MinIO, then apply migrations:
 
 ```bash
-docker compose up -d postgres
-pnpm install
-pnpm db:generate
+docker compose up -d
 pnpm db:migrate
+```
+
+Required env vars are `DATABASE_URL`, `DIRECT_URL`, `AUTH_SECRET`, and the `S3_*` group (defaults match the Docker MinIO service). Optional groups degrade to no-ops when unset: `TURNSTILE_*` (captcha), `VAPID_*` and `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (push), `AUTH_GOOGLE_*` (OAuth), `VOTE_IP_CAP` (defaults to 40).
+
+## Usage
+
+```bash
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
-
-The initial migration is:
-
-```text
-prisma/migrations/20260623225539_init
-```
-
-## Environment variables
-
-```dotenv
-DATABASE_URL="postgresql://cypher:cypher@localhost:5432/cypher?schema=public"
-DIRECT_URL="postgresql://cypher:cypher@localhost:5432/cypher?schema=public"
-AUTH_SECRET="generate-with: openssl rand -base64 33"
-AUTH_GOOGLE_ID=""
-AUTH_GOOGLE_SECRET=""
-```
-
-Google is registered as an Auth.js provider only when both Google variables are populated.
-
-For Neon or Supabase production deployments:
-
-- `DATABASE_URL`: pooled/serverless connection
-- `DIRECT_URL`: unpooled direct connection for migrations
-- `AUTH_SECRET`: a real production secret
-
-Never commit a populated `.env`.
-
-## Authentication flow
-
-- Register a host account at `/register`
-- Sign in at `/login`
-- Successful authentication redirects to `/dashboard`
-- `/dashboard` performs a server-side authorization check
-- Credentials sessions use signed JWT cookies
-- Passwords are stored only as Argon2id hashes
-- Google OAuth is optional and uses the Prisma adapter
-- Session data exposes `id`, `username`, and `role`
-
-## Channel flow
-
-- Authenticated hosts create rooms at `/dashboard/channels/new`
-- Each room receives a cryptographically generated six-character code
-- Hosts manage settings, `DRAFT`/`OPEN` state, and members from `/dashboard/channels/[id]`
-- Members enter a code at `/join` and land on `/c/[code]`
-- Registered joins are tied to the account
-- Optional guest joins use a signed, httpOnly `cypher_guest` cookie
-- Track submission remains a placeholder for H04
-
-## Commands
+Serves at `http://localhost:3000`. Register a host at `/register`, create a channel from `/dashboard`, open it, then share the join code. Participants open `/c/<CODE>` to join, submit, and vote; the battle board is at `/c/<CODE>/battle`.
 
 ```bash
-pnpm lint
-pnpm typecheck
-pnpm build
-pnpm db:generate
-pnpm db:migrate
-pnpm db:studio
+pnpm build && pnpm start
 ```
 
-## Stack
+Other scripts: `pnpm typecheck`, `pnpm lint`, `pnpm db:studio`.
 
-- Next.js 15 App Router
-- React 19
-- TypeScript strict
-- Tailwind CSS 4
-- Framer Motion
-- Auth.js v5 / NextAuth beta
-- Prisma 6 + PostgreSQL 16
-- Argon2id password hashing
-- Zod validation
-- pnpm
+## Project Structure
 
-Prisma 6 is intentionally pinned because the canonical schema uses the Prisma 6 datasource format and the installed Auth.js Prisma adapter supports Prisma through v6.
+```
+Cypher/
+├── prisma/
+│   ├── schema.prisma          — data model
+│   └── migrations/            — applied migrations
+├── public/                    — static assets, service worker (sw.js)
+├── src/
+│   ├── app/
+│   │   ├── api/               — route handlers (channels, votes, battles, push, auth)
+│   │   ├── c/[code]/          — public room + battle board
+│   │   └── dashboard/         — host management
+│   ├── components/            — UI (voting, channels, submissions, notifications)
+│   └── lib/                   — vote pipeline, battles, membership, storage, auth
+├── docker-compose.yml         — PostgreSQL + MinIO
+├── docs/                      — ROADMAP and technical plan
+└── .env.example
+```
 
-## Design system
+## Notes
 
-The H01 dark-neon token layer remains in `src/app/globals.css`.
-
-Reusable primitives now include:
-
-- `Button` variants via CVA
-- `Input`
-- `Textarea`
-- auth shell and form components
-- channel forms, status badges, copy controls, and join panels
-- shared motion components and responsive dashboard shell
-
-All visible controls retain 44px minimum tap targets, focus states, and reduced-motion behavior.
+- PostgreSQL is authoritative for votes. The unique constraint on `Vote.dedupeKey` (namespaced per submission or per matchup, keyed by user id or hashed fingerprint) is the final guard against double voting; IP is a rate cap only, since NAT and mobile networks share addresses.
+- IP and fingerprint are stored only as HMAC hashes, never raw.
+- Turnstile and web push are configuration-gated: with their env keys unset the app builds and runs, the captcha check is skipped, and the push sender is a no-op.
+- The Docker Compose PostgreSQL maps to host port `5434` to avoid colliding with a local `5432`; the committed `.env.example` default uses `5432`, so align `DATABASE_URL` with whichever you run.

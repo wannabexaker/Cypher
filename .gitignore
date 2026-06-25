@@ -48,3 +48,4 @@ tmp-e2e/
 # Internal AI-orchestration handoffs/reviews (local only, not public)
 docs/codex/
 docs/CODEX_TASKS.md
+docs/notes.md
