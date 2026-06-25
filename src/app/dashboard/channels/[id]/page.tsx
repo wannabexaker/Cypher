@@ -258,6 +258,12 @@ export default async function ManageChannelPage({ params }: PageProps) {
             <CopyButton value={channel.code} label="Copy code" />
             <CopyButton value={`/c/${channel.code}`} label="Copy share link" />
             <Link
+              href={`/dashboard/channels/${channel.id}/stats`}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              Room stats
+            </Link>
+            <Link
               href={`/c/${channel.code}`}
               className={buttonVariants({ variant: "gradient", size: "sm" })}
             >
