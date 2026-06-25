@@ -33,9 +33,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 ### v1.1 features (locked 2026-06-24 — δες plan §1c)
 Judge/Artist participation · Moderators · Timers (auto-close+extend) · Notifications (in-app + web push).
 - [x] **H06** → Voting (**W/L** per track, live W% split, everyone votes) + anti-fraud — ✅ reviewed + 🔒 security pass + merged (`8b6218a`)
-- [~] **H07** → Timers (auto-close + extend) + live countdown — next
-- [ ] **H08** → Notifications: web push (VAPID + SW) + in-app banners
-- [ ] **H09** → Results + battle bracket · **H10** → Stats · **H11** → Hardening (rate limits/CSP/worker)
+- [x] **H07** → Timers (auto-close + extend) + live countdown — ✅ reviewed + 🔒 + merged (`0a65a60`)
+- [~] **H08** → Notifications: web push (VAPID + SW) + in-app banners — next (event-driven, no cron)
+- [ ] **H09** → Results + battle bracket · **H10** → Stats · **H11** → Hardening (rate limits/CSP/worker + auth)
 
 ## Phase 2 — Core loop (MVP)
 - [ ] Organizer: create competition + review (approve/reject)
