@@ -398,6 +398,7 @@ model BattleRound {
 model Matchup {
   id                 String        @id @default(uuid())
   roundId            String        @map("round_id")
+  position           Int           @default(0) @map("position")
   submissionAId      String        @map("submission_a_id")
   submissionBId      String?       @map("submission_b_id") // null = bye
   votesA             Int           @default(0) @map("votes_a")

@@ -102,7 +102,7 @@ export async function getBattleState(
           roundNumber: true,
           status: true,
           matchups: {
-            orderBy: { id: "asc" },
+            orderBy: { position: "asc" },
             select: {
               id: true,
               status: true,

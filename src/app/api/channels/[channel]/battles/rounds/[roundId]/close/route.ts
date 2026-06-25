@@ -79,10 +79,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
       roundNumber: true,
       status: true,
       matchups: {
-        orderBy: { id: "asc" },
+        orderBy: { position: "asc" },
         select: {
           id: true,
           status: true,
+          position: true,
           submissionAId: true,
           submissionBId: true,
         },
@@ -246,6 +247,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
             { length: winners.length / 2 },
             (_, index) => ({
               roundId: next.id,
+              position: index,
               submissionAId: winners[index * 2],
               submissionBId: winners[index * 2 + 1],
               status: MatchupStatus.VOTING_OPEN,

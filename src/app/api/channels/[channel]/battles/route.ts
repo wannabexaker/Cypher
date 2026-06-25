@@ -137,6 +137,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
           const right = seeded[k - 1 - index];
           return {
             roundId: round.id,
+            position: index,
             submissionAId: left.id,
             submissionBId: right.id,
             status: MatchupStatus.VOTING_OPEN,
