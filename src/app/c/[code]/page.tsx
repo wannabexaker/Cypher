@@ -16,6 +16,7 @@ import { SubmitTrackPanel } from "@/components/submissions/SubmitTrackPanel";
 import { TrackPlayer } from "@/components/submissions/TrackPlayer";
 import { buttonVariants } from "@/components/ui/button";
 import { VoteControl } from "@/components/voting/VoteControl";
+import { VotingCountdown } from "@/components/voting/VotingCountdown";
 import {
   GUEST_COOKIE_NAME,
   readGuestToken,
@@ -138,6 +139,16 @@ export default async function ChannelRoomPage({ params }: PageProps) {
   ]);
 
   const isOpen = channel.status === ChannelStatus.OPEN;
+  const votingClosed = Boolean(
+    channel.votingClosesAt &&
+      channel.votingClosesAt.getTime() <= Date.now(),
+  );
+  const canVote = Boolean(membership && isOpen && !votingClosed);
+  const voteDisabledReason = votingClosed
+    ? "Voting has closed for this room."
+    : membership
+      ? "Voting is available while this room is open."
+      : "Join the room to cast a W or L.";
   const choices = new Map<string, "WIN" | "LOSS">();
   for (const vote of ownVotes) {
     if (!choices.has(vote.submissionId)) {
@@ -245,6 +256,14 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                 </span>
               </div>
 
+              {channel.votingClosesAt && (
+                <div className="mt-4">
+                  <VotingCountdown
+                    closesAt={channel.votingClosesAt.toISOString()}
+                  />
+                </div>
+              )}
+
               {approvedSubmissions.length === 0 ? (
                 <p className="mt-4 leading-7 text-muted-foreground">
                   No approved tracks yet. Once the host signs off, they drop here.
@@ -282,12 +301,8 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                         initialWinCount={submission.winCount}
                         initialLossCount={submission.lossCount}
                         initialChoice={choices.get(submission.id)}
-                        canVote={Boolean(membership && isOpen)}
-                        disabledReason={
-                          membership
-                            ? "Voting is available while this room is open."
-                            : "Join the room to cast a W or L."
-                        }
+                        canVote={canVote}
+                        disabledReason={voteDisabledReason}
                         turnstileSiteKey={turnstileSiteKey}
                       />
                     </li>

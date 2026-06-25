@@ -204,6 +204,10 @@ model Channel {
   votingStartAt     DateTime? @map("voting_start_at")
   votingEndAt       DateTime? @map("voting_end_at")
 
+  // H07 host-armed voting window (lazy, just-in-time enforcement; null = open indefinitely)
+  votingOpenedAt DateTime? @map("voting_opened_at") // set when the host first arms a window
+  votingClosesAt DateTime? @map("voting_closes_at") // the armed deadline; null = no timer
+
   resultsVisibility  ResultsVisibility @default(AFTER_CLOSE) @map("results_visibility")
   voteScope          VoteScope         @default(PER_SUBMISSION) @map("vote_scope")
   maxVotesPerVoter   Int               @default(1) @map("max_votes_per_voter")

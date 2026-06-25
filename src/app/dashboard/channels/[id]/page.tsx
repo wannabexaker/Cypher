@@ -9,11 +9,13 @@ import {
   ListChecks,
   Music2,
   Radio,
+  Timer,
   Users,
 } from "lucide-react";
 
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { ChannelStatusControl } from "@/components/channels/ChannelStatusControl";
+import { ChannelTimerControl } from "@/components/channels/ChannelTimerControl";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { ManageChannelForm } from "@/components/channels/ManageChannelForm";
 import { MemberRoleControl } from "@/components/channels/MemberRoleControl";
@@ -49,6 +51,8 @@ export default async function ManageChannelPage({ params }: PageProps) {
       allowGuestUploads: true,
       status: true,
       hostId: true,
+      votingOpenedAt: true,
+      votingClosesAt: true,
       members: {
         orderBy: [{ role: "asc" }, { createdAt: "asc" }],
         select: {
@@ -196,6 +200,26 @@ export default async function ManageChannelPage({ params }: PageProps) {
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="space-y-6">
+          <section className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-7">
+            <div className="flex items-center gap-3">
+              <Timer className="size-5 text-cyan" />
+              <h2 className="text-2xl font-bold text-foreground">
+                Voting timer
+              </h2>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Arm a deadline to auto-lock voting. Extend to push it later, or
+              close the window now. No timer keeps voting open indefinitely.
+            </p>
+            <div className="mt-6">
+              <ChannelTimerControl
+                channelId={channel.id}
+                status={channel.status}
+                closesAt={channel.votingClosesAt?.toISOString() ?? null}
+              />
+            </div>
+          </section>
+
           <section className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-7">
             <div className="flex items-center gap-3">
               <Radio className="size-5 text-primary-glow" />

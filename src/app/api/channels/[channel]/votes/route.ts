@@ -63,7 +63,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const channel = await prisma.channel.findUnique({
     where: { code: parsedCode.data },
-    select: { id: true, status: true },
+    select: { id: true, status: true, votingClosesAt: true },
   });
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
@@ -71,6 +71,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (channel.status !== ChannelStatus.OPEN) {
     return NextResponse.json(
       { error: "Voting is only open while the room is open." },
+      { status: 409 },
+    );
+  }
+  if (channel.votingClosesAt && Date.now() >= channel.votingClosesAt.getTime()) {
+    return NextResponse.json(
+      { error: "Voting has closed for this room." },
       { status: 409 },
     );
   }

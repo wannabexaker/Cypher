@@ -30,6 +30,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     where: { code: parsedCode.data },
     select: {
       id: true,
+      votingClosesAt: true,
       submissions: {
         where: { status: SubmissionStatus.APPROVED },
         select: {
@@ -104,5 +105,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
     tiedSubmissionIds:
       tiedSubmissionIds.length > 1 ? tiedSubmissionIds : [],
     choices,
+    votingClosesAt: channel.votingClosesAt,
+    votingClosed: Boolean(
+      channel.votingClosesAt &&
+        Date.now() >= channel.votingClosesAt.getTime(),
+    ),
   });
 }
