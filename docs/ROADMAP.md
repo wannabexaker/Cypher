@@ -32,8 +32,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ### v1.1 features (locked 2026-06-24 — δες plan §1c)
 Judge/Artist participation · Moderators · Timers (auto-close+extend) · Notifications (in-app + web push).
-- [~] **H06** → Voting (**W/L** per track, live W% split, everyone votes) + anti-fraud — `docs/codex/handoff-06-voting.md` (queued)
-- [ ] **H07** → Timers (auto-close + extend) + live countdown
+- [x] **H06** → Voting (**W/L** per track, live W% split, everyone votes) + anti-fraud — ✅ reviewed + 🔒 security pass + merged (`8b6218a`)
+- [~] **H07** → Timers (auto-close + extend) + live countdown — next
 - [ ] **H08** → Notifications: web push (VAPID + SW) + in-app banners
 - [ ] **H09** → Results + battle bracket · **H10** → Stats · **H11** → Hardening (rate limits/CSP/worker)
 
