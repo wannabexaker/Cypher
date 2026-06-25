@@ -36,7 +36,8 @@ Judge/Artist participation · Moderators · Timers (auto-close+extend) · Notifi
 - [x] **H07** → Timers (auto-close + extend) + live countdown — ✅ reviewed + 🔒 + merged (`0a65a60`)
 - [x] **H08** → Notifications: web push (VAPID + SW) + in-app banners — ✅ reviewed + 🔒 + merged (`b138c52`)
 - [x] **H09** → Results finalization + champion + results-visibility — ✅ reviewed + 🔒 + merged (`1b283c4`). **Single-room MVP loop complete.**
-- [~] **H10** → Battle bracket (single-elimination) — next · **H11** → Stats · **H12** → Hardening (rate limits/CSP/worker + auth)
+- [x] **H10** → Battle bracket (single-elimination, W/L per track) — ✅ reviewed + 🔒 + merged (`8cadd72`). ⚠️ H10.1 follow-up: fix matchup ordering for k≥8 (add `Matchup.position`).
+- [~] **H11** → Stats dashboard — next · **H12** → Hardening (rate limits/CSP/worker + auth)
 
 ## Phase 2 — Core loop (MVP)
 - [ ] Organizer: create competition + review (approve/reject)
