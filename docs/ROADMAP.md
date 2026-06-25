@@ -35,7 +35,8 @@ Judge/Artist participation · Moderators · Timers (auto-close+extend) · Notifi
 - [x] **H06** → Voting (**W/L** per track, live W% split, everyone votes) + anti-fraud — ✅ reviewed + 🔒 security pass + merged (`8b6218a`)
 - [x] **H07** → Timers (auto-close + extend) + live countdown — ✅ reviewed + 🔒 + merged (`0a65a60`)
 - [x] **H08** → Notifications: web push (VAPID + SW) + in-app banners — ✅ reviewed + 🔒 + merged (`b138c52`)
-- [~] **H09** → Results + battle bracket — next · **H10** → Stats · **H11** → Hardening (rate limits/CSP/worker + auth)
+- [~] **H09** → Results finalization + champion + results-visibility — next (battle split out)
+- [ ] **H10** → Battle bracket (single-elimination) · **H11** → Stats · **H12** → Hardening (rate limits/CSP/worker + auth)
 
 ## Phase 2 — Core loop (MVP)
 - [ ] Organizer: create competition + review (approve/reject)
