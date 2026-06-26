@@ -5,7 +5,11 @@ import { canManageChannel } from "@/lib/channels";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { finalizeChannelSchema } from "@/lib/validation/finalize";
-import { compareWinRatio, hasSameWinRatio } from "@/lib/votes";
+import {
+  compareWinRatio,
+  computeSubmissionFinalCounts,
+  hasSameWinRatio,
+} from "@/lib/votes";
 
 export const runtime = "nodejs";
 
@@ -65,7 +69,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const submissions = await prisma.submission.findMany({
     where: { channelId: channel.id, status: SubmissionStatus.APPROVED },
-    select: { id: true, winCount: true, lossCount: true, createdAt: true },
+    select: {
+      id: true,
+      createdAt: true,
+      roundResultMode: true,
+      trackVoteRounds: {
+        select: { id: true, advances: true },
+      },
+    },
   });
 
   if (submissions.length === 0) {
@@ -75,54 +86,29 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  // H13: If outcomeType is BATTLE, skip crowning and transition to battle
-  if (parsed.data.outcomeType === "BATTLE") {
-    const now = new Date();
-    // H14: even the BATTLE outcome eventually settles into COMPLETED via the
-    // battle round close — that's where purgeAfter is stamped. We do NOT set
-    // it here because the room is still active (mid-bracket).
-    const updated = await prisma.$transaction(async (transaction) => {
-      const next = await transaction.channel.update({
-        where: { id: channel.id },
-        data: {
-          status: ChannelStatus.BATTLE,
-          completedAt: now,
-          votingClosesAt: now,
-        },
-        select: {
-          status: true,
-          completedAt: true,
-        },
-      });
-
-      await transaction.auditLog.create({
-        data: {
-          actorUserId: user.id,
-          action: "channel.finalize",
-          entityType: "channel",
-          entityId: channel.id,
-          metadata: {
-            outcomeType: "BATTLE",
-            transitionedToBattle: true,
-          },
-        },
-      });
-
-      return next;
-    });
-
-    return NextResponse.json({
-      status: updated.status,
-      completedAt: updated.completedAt,
-      message: "Room transitioned to battle mode.",
-    });
-  }
-
-  // CROWN_NOW: proceed with existing crown logic
+  // H13.1: compute each track's *final* W/L from its rounds + roundResultMode.
+  // SELECTED counts only the advancing round; MERGE sums all rounds; the
+  // helper falls back to legacy channel-wide votes when a track has no rounds.
+  const scored = await Promise.all(
+    submissions.map(async (submission) => {
+      const counts = await computeSubmissionFinalCounts(
+        prisma,
+        submission.id,
+        submission.roundResultMode,
+        submission.trackVoteRounds,
+      );
+      return {
+        id: submission.id,
+        createdAt: submission.createdAt,
+        winCount: counts.winCount,
+        lossCount: counts.lossCount,
+      };
+    }),
+  );
 
   // Rank by W ratio (highest first); break display order on more votes, then
   // earlier submission — same ordering the results route uses.
-  const ranked = [...submissions].sort((a, b) => {
+  const ranked = [...scored].sort((a, b) => {
     const ratioOrder = compareWinRatio(b, a);
     if (ratioOrder !== 0) return ratioOrder;
     const totalA = a.winCount + a.lossCount;
@@ -161,6 +147,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // purgeAfter <= now; the host can also delete sooner from the dashboard.
   const purgeAfter = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
   const updated = await prisma.$transaction(async (transaction) => {
+    // H13.1: persist each track's final counts so the results page mirrors the
+    // ranking the crown used (otherwise MERGE-vs-SELECTED would diverge from
+    // the denormalized live counters).
+    for (const submission of scored) {
+      await transaction.submission.update({
+        where: { id: submission.id },
+        data: {
+          winCount: submission.winCount,
+          lossCount: submission.lossCount,
+        },
+      });
+    }
+
     const next = await transaction.channel.update({
       where: { id: channel.id },
       data: {
@@ -183,7 +182,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         action: "channel.finalize",
         entityType: "channel",
         entityId: channel.id,
-        metadata: { championSubmissionId, tieBroken, outcomeType: parsed.data.outcomeType },
+        metadata: { championSubmissionId, tieBroken },
       },
     });
 
