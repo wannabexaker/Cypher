@@ -20,7 +20,7 @@ import {
   createBattleSchema,
 } from "@/lib/validation/battle";
 import { channelCodeSchema } from "@/lib/validation/channels";
-import { compareWinRatio } from "@/lib/votes";
+import { compareWinRatio, computeSubmissionFinalCounts } from "@/lib/votes";
 
 export const runtime = "nodejs";
 
@@ -82,9 +82,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
     },
     select: {
       id: true,
-      winCount: true,
-      lossCount: true,
       createdAt: true,
+      roundResultMode: true,
+      trackVoteRounds: {
+        select: { id: true, advances: true },
+      },
     },
   });
 
@@ -96,7 +98,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  const ranked = [...approved].sort((a, b) => {
+  // H13.1: seed by each track's final W% under its roundResultMode so battle
+  // seeding agrees with the crown ranking. Falls back to legacy channel-wide
+  // votes for tracks that never ran a TrackVoteRound.
+  const scored = await Promise.all(
+    approved.map(async (submission) => {
+      const counts = await computeSubmissionFinalCounts(
+        prisma,
+        submission.id,
+        submission.roundResultMode,
+        submission.trackVoteRounds,
+      );
+      return {
+        id: submission.id,
+        createdAt: submission.createdAt,
+        winCount: counts.winCount,
+        lossCount: counts.lossCount,
+      };
+    }),
+  );
+
+  const ranked = [...scored].sort((a, b) => {
     const ratioOrder = compareWinRatio(b, a);
     if (ratioOrder !== 0) return ratioOrder;
     const totalA = a.winCount + a.lossCount;
