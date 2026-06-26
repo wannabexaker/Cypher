@@ -107,6 +107,11 @@ enum RoundStatus {
   CLOSED
 }
 
+enum ResultMode {
+  MERGE      // sum all track's rounds
+  SELECTED   // use the advancing round
+}
+
 enum MatchupStatus {
   PENDING
   VOTING_OPEN
@@ -227,6 +232,7 @@ model Channel {
   members           ChannelMember[]
   submissions       Submission[]
   votes             Vote[]
+  trackVoteRounds   TrackVoteRound[]  // H13
   battleRounds      BattleRound[]
   pushSubscriptions PushSubscription[]
 
@@ -298,17 +304,19 @@ model Submission {
   voteCount         Int              @default(0) @map("vote_count") // denormalized; truth = count(valid votes)
   winCount          Int              @default(0) @map("win_count")
   lossCount         Int              @default(0) @map("loss_count")
+  roundResultMode   ResultMode       @default(MERGE) @map("round_result_mode") // H13: how the track's final is computed
   createdAt         DateTime         @default(now()) @map("created_at")
 
-  channel         Channel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  championOf      Channel[]     @relation("ChannelChampion")
-  submitterMember ChannelMember @relation(fields: [submitterMemberId], references: [id])
-  reviewedBy      User?         @relation("ReviewedBy", fields: [reviewedById], references: [id])
-  mediaAsset      MediaAsset?   @relation(fields: [mediaAssetId], references: [id])
+  channel         Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  championOf      Channel[]         @relation("ChannelChampion")
+  submitterMember ChannelMember     @relation(fields: [submitterMemberId], references: [id])
+  reviewedBy      User?             @relation("ReviewedBy", fields: [reviewedById], references: [id])
+  mediaAsset      MediaAsset?       @relation(fields: [mediaAssetId], references: [id])
   votes           Vote[]
-  matchupsAsA     Matchup[]     @relation("MatchupSubmissionA")
-  matchupsAsB     Matchup[]     @relation("MatchupSubmissionB")
-  matchupsWon     Matchup[]     @relation("MatchupWinner")
+  trackVoteRounds TrackVoteRound[]   // H13: voting rounds for this track
+  matchupsAsA     Matchup[]         @relation("MatchupSubmissionA")
+  matchupsAsB     Matchup[]         @relation("MatchupSubmissionB")
+  matchupsWon     Matchup[]         @relation("MatchupWinner")
 
   @@index([channelId, status])
   @@map("submissions")
@@ -344,12 +352,13 @@ model MediaAsset {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Vote {
-  id           String  @id @default(uuid())
-  channelId    String  @map("channel_id")
-  submissionId String  @map("submission_id")
-  roundId      String? @map("round_id")
-  matchupId    String? @map("matchup_id")
-  voterUserId  String? @map("voter_user_id")
+  id                 String  @id @default(uuid())
+  channelId          String  @map("channel_id")
+  submissionId       String  @map("submission_id")
+  roundId            String? @map("round_id")                // BattleRound for battle votes
+  matchupId          String? @map("matchup_id")              // for battle matchup votes
+  trackVoteRoundId   String? @map("track_vote_round_id")     // H13: for qualifying track votes
+  voterUserId        String? @map("voter_user_id")
 
   ipHash          String  @map("ip_hash") // HMAC, rate cap only
   fingerprintHash String? @map("fingerprint_hash") // HMAC, primary guest identity
@@ -361,17 +370,44 @@ model Vote {
   isValid   Boolean    @default(true) @map("is_valid")
   createdAt DateTime   @default(now()) @map("created_at")
 
-  channel    Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  submission Submission   @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  round      BattleRound? @relation(fields: [roundId], references: [id])
-  matchup    Matchup?     @relation(fields: [matchupId], references: [id])
-  voter      User?        @relation(fields: [voterUserId], references: [id])
+  channel        Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  submission     Submission      @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  round          BattleRound?    @relation(fields: [roundId], references: [id])
+  matchup        Matchup?        @relation(fields: [matchupId], references: [id])
+  trackVoteRound TrackVoteRound? @relation(fields: [trackVoteRoundId], references: [id])
+  voter          User?           @relation(fields: [voterUserId], references: [id])
 
   @@unique([dedupeKey]) // FINAL guard against double-voting (catches races)
   @@index([channelId, isValid])
   @@index([submissionId, isValid])
   @@index([ipHash, channelId])
+  @@index([trackVoteRoundId])
   @@map("votes")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// H13 Track voting rounds (per-track multi-round live voting)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model TrackVoteRound {
+  id              String      @id @default(uuid())
+  channelId       String      @map("channel_id")
+  submissionId    String      @map("submission_id")
+  index           Int         @map("index")                    // 1..5
+  status          RoundStatus @default(VOTING_OPEN) @map("status")
+  advances        Boolean     @default(false) @map("advances") // host-selected round
+  durationSeconds Int?        @map("duration_seconds")          // optional countdown
+  openedAt        DateTime    @default(now()) @map("opened_at")
+  closesAt        DateTime?   @map("closes_at")                // openedAt + duration
+  closedAt        DateTime?   @map("closed_at")
+
+  channel    Channel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  submission Submission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  votes      Vote[]
+
+  @@unique([submissionId, index])
+  @@index([channelId, status])
+  @@map("track_vote_rounds")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
