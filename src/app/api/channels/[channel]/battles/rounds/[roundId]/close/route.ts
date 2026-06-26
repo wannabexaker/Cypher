@@ -224,12 +224,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
         if (winners.length === 1) {
           championSubmissionId = winners[0];
           completed = true;
+          // H14: room is COMPLETED → stamp the 3-day retention cutoff so the
+          // cron purge can sweep it. Hosts can still delete sooner.
+          const purgeAfter = new Date(
+            now.getTime() + 3 * 24 * 60 * 60 * 1000,
+          );
           await transaction.channel.update({
             where: { id: channel.id },
             data: {
               championSubmissionId,
               status: ChannelStatus.COMPLETED,
               completedAt: now,
+              purgeAfter,
             },
           });
         } else {

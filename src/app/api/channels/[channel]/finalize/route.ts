@@ -78,6 +78,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // H13: If outcomeType is BATTLE, skip crowning and transition to battle
   if (parsed.data.outcomeType === "BATTLE") {
     const now = new Date();
+    // H14: even the BATTLE outcome eventually settles into COMPLETED via the
+    // battle round close — that's where purgeAfter is stamped. We do NOT set
+    // it here because the room is still active (mid-bracket).
     const updated = await prisma.$transaction(async (transaction) => {
       const next = await transaction.channel.update({
         where: { id: channel.id },
@@ -154,6 +157,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const now = new Date();
+  // H14: stamp the retention cutoff at finalize. Cron sweeps channels with
+  // purgeAfter <= now; the host can also delete sooner from the dashboard.
+  const purgeAfter = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
   const updated = await prisma.$transaction(async (transaction) => {
     const next = await transaction.channel.update({
       where: { id: channel.id },
@@ -162,6 +168,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         completedAt: now,
         championSubmissionId,
         votingClosesAt: now,
+        purgeAfter,
       },
       select: {
         status: true,

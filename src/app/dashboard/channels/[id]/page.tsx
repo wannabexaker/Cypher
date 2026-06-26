@@ -13,15 +13,19 @@ import {
   Radio,
   Swords,
   Timer,
+  Trash2,
+  UserCog,
   Users,
 } from "lucide-react";
 
 import { ChannelBattleCreateControl } from "@/components/channels/ChannelBattleCreateControl";
 import { ChannelBattleRoundCloseControl } from "@/components/channels/ChannelBattleRoundCloseControl";
+import { ChannelDeleteControl } from "@/components/channels/ChannelDeleteControl";
 import { ChannelFinalizeControl } from "@/components/channels/ChannelFinalizeControl";
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { ChannelStatusControl } from "@/components/channels/ChannelStatusControl";
 import { ChannelTimerControl } from "@/components/channels/ChannelTimerControl";
+import { ChannelTransferControl } from "@/components/channels/ChannelTransferControl";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { ManageChannelForm } from "@/components/channels/ManageChannelForm";
 import { MemberRoleControl } from "@/components/channels/MemberRoleControl";
@@ -71,6 +75,7 @@ export default async function ManageChannelPage({ params }: PageProps) {
           role: true,
           participation: true,
           createdAt: true,
+          userId: true,
         },
       },
     },
@@ -214,6 +219,12 @@ export default async function ManageChannelPage({ params }: PageProps) {
   const judgeCount = channel.members.filter(
     (member) => member.role !== "HOST" && member.participation === "JUDGE",
   ).length;
+
+  // H14: transfer picker — only registered users (have userId) and not the
+  // current host. Guests can never be hosts.
+  const transferCandidates = channel.members
+    .filter((member) => member.userId && member.userId !== channel.hostId)
+    .map((member) => ({ id: member.id, displayName: member.displayName }));
 
   return (
     <div className="section-shell py-8 sm:py-12">
@@ -477,6 +488,45 @@ export default async function ManageChannelPage({ params }: PageProps) {
 
             <div className="mt-6">
               <ModerationQueue submissions={moderationQueue} />
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-7">
+            <div className="flex items-center gap-3">
+              <UserCog className="size-5 text-cyan" />
+              <h2 className="text-2xl font-bold text-foreground">
+                Transfer room
+              </h2>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              Hand the host role to another registered member. They take over
+              every host tool; you drop back to a normal member.
+            </p>
+            <div className="mt-6">
+              <ChannelTransferControl
+                channelId={channel.id}
+                candidates={transferCandidates}
+              />
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-magenta/30 bg-magenta/5 p-5 shadow-panel sm:p-7">
+            <div className="flex items-center gap-3">
+              <Trash2 className="size-5 text-magenta" />
+              <h2 className="text-2xl font-bold text-foreground">
+                Danger zone
+              </h2>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              Completed rooms auto-purge 3 days after they end. You can also
+              delete this channel now &mdash; the room, members, submissions,
+              votes and every uploaded track will be gone for good.
+            </p>
+            <div className="mt-6">
+              <ChannelDeleteControl
+                channelId={channel.id}
+                channelName={channel.name}
+              />
             </div>
           </section>
         </div>
