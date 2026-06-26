@@ -1,6 +1,6 @@
 "use client";
 
-import { Link2, LoaderCircle, Music2, UploadCloud } from "lucide-react";
+import { History, Link2, LoaderCircle, Music2, UploadCloud } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
@@ -27,9 +27,19 @@ export type MySubmission = {
   mediaAssetId: string | null;
 };
 
+// H14: read-only summary of the caller's own most recent submissions for the
+// one-click re-use shortcut. Scope: own rows only, taken server-side.
+export type RecentSubmission = {
+  id: string;
+  trackTitle: string;
+  sourceType: string;
+  externalUrl: string | null;
+};
+
 type SubmitTrackPanelProps = {
   code: string;
   mySubmission: MySubmission | null;
+  recentSubmissions?: RecentSubmission[];
 };
 
 type Mode = "file" | "embed";
@@ -43,7 +53,11 @@ function mimeFromFilename(name: string): "audio/mpeg" | "audio/wav" | null {
   return null;
 }
 
-export function SubmitTrackPanel({ code, mySubmission }: SubmitTrackPanelProps) {
+export function SubmitTrackPanel({
+  code,
+  mySubmission,
+  recentSubmissions = [],
+}: SubmitTrackPanelProps) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<Mode>("file");
@@ -58,6 +72,20 @@ export function SubmitTrackPanel({ code, mySubmission }: SubmitTrackPanelProps) 
 
   const locked = mySubmission?.status === "APPROVED";
   const busy = phase !== "idle";
+
+  // H14: prefill from a previous submission. Embed → title + URL (link is
+  // re-usable). File → title only (the artist must upload a new file because
+  // each MediaAsset is one-shot bound to a submission).
+  function reuseSubmission(entry: RecentSubmission) {
+    setTrackTitle(entry.trackTitle);
+    setError("");
+    if (entry.sourceType.startsWith("FILE")) {
+      setMode("file");
+    } else {
+      setMode("embed");
+      setExternalUrl(entry.externalUrl ?? "");
+    }
+  }
 
   async function submitFile() {
     const file = fileRef.current?.files?.[0];
@@ -225,6 +253,48 @@ export function SubmitTrackPanel({ code, mySubmission }: SubmitTrackPanelProps) 
               ? "Submit again to replace your pending entry."
               : "Upload an MP3/WAV or paste an official Spotify/SoundCloud link."}
           </p>
+
+          {recentSubmissions.length > 0 && (
+            <section className="mt-5 rounded-lg border border-border bg-background p-4">
+              <div className="flex items-center gap-2 font-mono text-[0.6875rem] font-bold tracking-[0.14em] text-cyan uppercase">
+                <History className="size-3.5" aria-hidden="true" />
+                Recent tracks
+              </div>
+              <ul className="mt-3 grid gap-2">
+                {recentSubmissions.map((entry) => {
+                  const isFile = entry.sourceType.startsWith("FILE");
+                  return (
+                    <li
+                      key={entry.id}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-elevated/60 px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-bold text-foreground">
+                          {entry.trackTitle}
+                        </p>
+                        <p className="mt-0.5 font-mono text-[0.625rem] tracking-[0.12em] text-muted-foreground uppercase">
+                          {isFile ? "File" : entry.sourceType}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => reuseSubmission(entry)}
+                        disabled={busy}
+                      >
+                        Re-use
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                Re-use prefills the title. File tracks still need a fresh
+                upload; embed links carry over.
+              </p>
+            </section>
+          )}
 
           <div
             className="mt-5 flex gap-2"
