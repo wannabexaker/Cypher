@@ -16,7 +16,9 @@ function authorized(request: Request): boolean {
   return header === `Bearer ${secret}`;
 }
 
-export async function POST(request: Request) {
+// H13.1: Vercel Cron Jobs invoke the path with a GET request (not POST), so
+// the handler must be exported as GET or the daily sweep would 405.
+export async function GET(request: Request) {
   if (!authorized(request)) {
     return NextResponse.json({ error: "Not authorized." }, { status: 401 });
   }
