@@ -75,6 +75,48 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
+  // H13: If outcomeType is BATTLE, skip crowning and transition to battle
+  if (parsed.data.outcomeType === "BATTLE") {
+    const now = new Date();
+    const updated = await prisma.$transaction(async (transaction) => {
+      const next = await transaction.channel.update({
+        where: { id: channel.id },
+        data: {
+          status: ChannelStatus.BATTLE,
+          completedAt: now,
+          votingClosesAt: now,
+        },
+        select: {
+          status: true,
+          completedAt: true,
+        },
+      });
+
+      await transaction.auditLog.create({
+        data: {
+          actorUserId: user.id,
+          action: "channel.finalize",
+          entityType: "channel",
+          entityId: channel.id,
+          metadata: {
+            outcomeType: "BATTLE",
+            transitionedToBattle: true,
+          },
+        },
+      });
+
+      return next;
+    });
+
+    return NextResponse.json({
+      status: updated.status,
+      completedAt: updated.completedAt,
+      message: "Room transitioned to battle mode.",
+    });
+  }
+
+  // CROWN_NOW: proceed with existing crown logic
+
   // Rank by W ratio (highest first); break display order on more votes, then
   // earlier submission — same ordering the results route uses.
   const ranked = [...submissions].sort((a, b) => {
@@ -134,7 +176,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         action: "channel.finalize",
         entityType: "channel",
         entityId: channel.id,
-        metadata: { championSubmissionId, tieBroken },
+        metadata: { championSubmissionId, tieBroken, outcomeType: parsed.data.outcomeType },
       },
     });
 
