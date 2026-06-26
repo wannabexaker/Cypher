@@ -61,7 +61,7 @@ export function AuthShell({
                     Host accounts only
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Channel tools unlock in the next handoff.
+                    Channel tools unlock after you sign in.
                   </p>
                 </div>
               </div>

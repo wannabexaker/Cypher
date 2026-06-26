@@ -142,8 +142,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     // Ownership: registered users own their assets; guest uploads have a null
-    // owner and are claimed via the secret random asset id (full identity
-    // binding is deferred to H08 — documented residual risk).
+    // owner and are claimed via the secret random asset id.
     const ownsAsset = identity.user
       ? asset.ownerUserId === identity.user.id
       : asset.ownerUserId === null;

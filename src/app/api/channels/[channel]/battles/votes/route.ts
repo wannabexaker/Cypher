@@ -133,7 +133,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
         lossCount: result.lossCount,
         total: result.total,
         winPct: getVoteSplit(result).winPct,
-        yourChoice: parsed.data.choice,
+        yourChoice: result.choice,
+        locked: result.locked,
       },
       { status: result.created ? 201 : 200 },
     );

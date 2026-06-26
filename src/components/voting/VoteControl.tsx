@@ -54,6 +54,7 @@ type VoteResponse = {
   winCount?: number;
   lossCount?: number;
   yourChoice?: VoteChoice;
+  locked?: boolean;
 };
 
 export function VoteControl({
@@ -82,6 +83,7 @@ export function VoteControl({
 
   const { total, winPct, lossPct } = getVoteSplit({ winCount, lossCount });
   const needsTurnstile = Boolean(turnstileSiteKey);
+  const voteLocked = Boolean(choice);
 
   function renderTurnstile() {
     if (
@@ -123,7 +125,7 @@ export function VoteControl({
     if (
       !canVote ||
       pending ||
-      choice === nextChoice ||
+      voteLocked ||
       (needsTurnstile && !turnstileToken)
     ) {
       return;
@@ -158,11 +160,7 @@ export function VoteControl({
       setWinCount(payload.winCount);
       setLossCount(payload.lossCount);
       setChoice(payload.yourChoice);
-      setMessage(
-        choice && choice !== payload.yourChoice
-          ? `Vote flipped to ${payload.yourChoice === "WIN" ? "W" : "L"}.`
-          : "Vote locked.",
-      );
+      setMessage(`You voted ${payload.yourChoice === "WIN" ? "W" : "L"}.`);
     } catch {
       setMessage("Unable to record your vote.");
     } finally {
@@ -237,21 +235,22 @@ export function VoteControl({
         <Button
           type="button"
           variant={choice === "WIN" ? "lime" : "outline"}
+          aria-label="Vote Win"
           aria-pressed={choice === "WIN"}
           disabled={
             !canVote ||
             pending ||
-            choice === "WIN" ||
+            voteLocked ||
             (needsTurnstile && !turnstileToken)
           }
           onClick={() => void cast("WIN")}
         >
           {pending ? <LoaderCircle className="motion-safe:animate-spin" /> : "W"}
-          Win
         </Button>
         <Button
           type="button"
           variant="outline"
+          aria-label="Vote Loss"
           aria-pressed={choice === "LOSS"}
           className={cn(
             choice === "LOSS" &&
@@ -260,15 +259,18 @@ export function VoteControl({
           disabled={
             !canVote ||
             pending ||
-            choice === "LOSS" ||
+            voteLocked ||
             (needsTurnstile && !turnstileToken)
           }
           onClick={() => void cast("LOSS")}
         >
           {pending ? <LoaderCircle className="motion-safe:animate-spin" /> : "L"}
-          Loss
         </Button>
       </div>
+
+      {voteLocked && (
+        <p className="mt-3 text-sm text-cyan">You voted {choice === "WIN" ? "W" : "L"}.</p>
+      )}
 
       {turnstileSiteKey && canVote && (
         <>

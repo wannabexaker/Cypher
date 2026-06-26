@@ -1,4 +1,4 @@
-import { ChannelStatus } from "@prisma/client";
+import { ChannelStatus, ResultsVisibility } from "@prisma/client";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Link from "next/link";
@@ -11,6 +11,7 @@ import { JoinRoomPanel } from "@/components/channels/JoinRoomPanel";
 import { buttonVariants } from "@/components/ui/button";
 import { VoteControl } from "@/components/voting/VoteControl";
 import { getBattleState } from "@/lib/battles";
+import { canManageChannel } from "@/lib/channels";
 import { GUEST_COOKIE_NAME, readGuestToken } from "@/lib/guest-session";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
@@ -41,6 +42,8 @@ export default async function BattleBracketPage({ params }: PageProps) {
       id: true,
       code: true,
       name: true,
+      hostId: true,
+      resultsVisibility: true,
       status: true,
       championSubmissionId: true,
       completedAt: true,
@@ -65,7 +68,7 @@ export default async function BattleBracketPage({ params }: PageProps) {
             userId: user.id,
           },
         },
-        select: { id: true, participation: true },
+          select: { id: true, role: true, participation: true },
       })
     : guestToken
       ? await prisma.channelMember.findUnique({
@@ -75,9 +78,21 @@ export default async function BattleBracketPage({ params }: PageProps) {
               guestToken,
             },
           },
-          select: { id: true, participation: true },
+          select: { id: true, role: true, participation: true },
         })
       : null;
+
+  const completed = channel.status === ChannelStatus.COMPLETED;
+  const callerIsHostOrModerator =
+    membership?.role === "HOST" ||
+    membership?.role === "MODERATOR" ||
+    Boolean(user && canManageChannel(user, { hostId: channel.hostId }));
+
+  const canSeeCounts =
+    channel.resultsVisibility === ResultsVisibility.LIVE ||
+    (channel.resultsVisibility === ResultsVisibility.AFTER_CLOSE && completed) ||
+    (channel.resultsVisibility === ResultsVisibility.HIDDEN && completed) ||
+    callerIsHostOrModerator;
 
   const battle = await getBattleState(
     channel.id,
@@ -159,6 +174,13 @@ export default async function BattleBracketPage({ params }: PageProps) {
 
       <section className="section-shell grid gap-8 pb-12 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="overflow-x-auto pb-2">
+          {!canSeeCounts && (
+            <p className="mb-4 rounded-md border border-border bg-surface px-4 py-3 text-sm text-muted-foreground">
+              {channel.resultsVisibility === ResultsVisibility.HIDDEN
+                ? "Results reveal when the host finalizes the room."
+                : "Results reveal when the battle is finalized."}
+            </p>
+          )}
           <div className="inline-grid min-w-full grid-flow-col gap-4">
             {battle.rounds.map((round) => (
               <section
@@ -226,8 +248,8 @@ export default async function BattleBracketPage({ params }: PageProps) {
                                 <VoteControl
                                   code={channel.code}
                                   submissionId={entry.id}
-                                  initialWinCount={side.winCount}
-                                  initialLossCount={side.lossCount}
+                                  initialWinCount={canSeeCounts ? side.winCount : 0}
+                                  initialLossCount={canSeeCounts ? side.lossCount : 0}
                                   initialChoice={ownChoice}
                                   canVote={canVote}
                                   disabledReason={

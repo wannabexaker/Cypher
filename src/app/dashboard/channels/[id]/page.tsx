@@ -55,6 +55,7 @@ export default async function ManageChannelPage({ params }: PageProps) {
       rules: true,
       genre: true,
       visibility: true,
+      resultsVisibility: true,
       allowGuestUploads: true,
       status: true,
       hostId: true,
@@ -388,6 +389,7 @@ export default async function ManageChannelPage({ params }: PageProps) {
                   rules: channel.rules,
                   genre: channel.genre,
                   visibility: channel.visibility,
+                  resultsVisibility: channel.resultsVisibility,
                   allowGuestUploads: channel.allowGuestUploads,
                 }}
               />

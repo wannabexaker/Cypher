@@ -88,8 +88,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  // TODO(H09): optional self-vote guard.
-  // TODO(H11): replace the basic DB IP cap with a Redis sliding window.
+  // TODO: optional self-vote guard.
+  // TODO: replace the basic DB IP cap with a Redis sliding window.
 
   try {
     const result = await castWlVote({
@@ -122,7 +122,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
         lossCount: result.lossCount,
         total: result.total,
         winPct: getVoteSplit(result).winPct,
-        yourChoice: parsed.data.choice,
+        yourChoice: result.choice,
+        locked: result.locked,
       },
       { status: result.created ? 201 : 200 },
     );

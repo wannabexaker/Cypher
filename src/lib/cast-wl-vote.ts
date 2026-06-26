@@ -47,6 +47,8 @@ type CastWlVoteInput = {
 
 export type CastWlVoteResult = {
   created: boolean;
+  locked: boolean;
+  choice: VoteChoice;
   winCount: number;
   lossCount: number;
   total: number;
@@ -63,7 +65,13 @@ export async function castWlVote(input: CastWlVoteInput): Promise<CastWlVoteResu
       : `g:${input.identity.guestToken ?? "unknown"}`;
   const dedupeKey = input.dedupeKeyForIdentity(voterIdentity);
 
+  const priorVote = await prisma.vote.findUnique({
+    where: { dedupeKey },
+    select: { choice: true },
+  });
+
   if (
+    !priorVote &&
     !(await verifyTurnstile({
       token: input.turnstileToken,
       remoteIp: clientIp ?? undefined,
@@ -95,27 +103,24 @@ export async function castWlVote(input: CastWlVoteInput): Promise<CastWlVoteResu
             if (votesFromIp >= voteIpCap) throw new VoteIpCapError();
           }
 
-          await transaction.vote.upsert({
-            where: { dedupeKey },
-            create: {
-              channelId: input.channelId,
-              submissionId: input.submissionId,
-              roundId: input.roundId,
-              matchupId: input.matchupId,
-              voterUserId: input.identity.user?.id ?? null,
-              ipHash,
-              fingerprintHash,
-              cookieToken: input.identity.guestToken,
-              userAgent,
-              dedupeKey,
-              choice: input.choice,
-              isValid: true,
-            },
-            update: {
-              choice: input.choice,
-              isValid: true,
-            },
-          });
+          if (!existing) {
+            await transaction.vote.create({
+              data: {
+                channelId: input.channelId,
+                submissionId: input.submissionId,
+                roundId: input.roundId,
+                matchupId: input.matchupId,
+                voterUserId: input.identity.user?.id ?? null,
+                ipHash,
+                fingerprintHash,
+                cookieToken: input.identity.guestToken,
+                userAgent,
+                dedupeKey,
+                choice: input.choice,
+                isValid: true,
+              },
+            });
+          }
 
           const grouped = await transaction.vote.groupBy({
             by: ["choice"],
@@ -132,35 +137,35 @@ export async function castWlVote(input: CastWlVoteInput): Promise<CastWlVoteResu
             grouped.find((group) => group.choice === "LOSS")?._count._all ?? 0;
           const total = winCount + lossCount;
 
-          if (input.updateAfterVote) {
+          if (!existing && input.updateAfterVote) {
             await input.updateAfterVote(transaction, { winCount, lossCount, total });
           }
 
-          const flippedFrom =
-            existing && existing.choice !== input.choice ? existing.choice : null;
-
-          await transaction.auditLog.create({
-            data: {
-              actorUserId: input.identity.user?.id ?? null,
-              action: "vote.cast",
-              entityType: "submission",
-              entityId: input.submissionId,
-              ipHash,
-              metadata: {
-                channelId: input.channelId,
-                submissionId: input.submissionId,
-                memberId: input.membershipId,
-                choice: input.choice,
-                ...(input.roundId ? { roundId: input.roundId } : {}),
-                ...(input.matchupId ? { matchupId: input.matchupId } : {}),
-                ...(flippedFrom ? { flippedFrom } : {}),
-                ...(input.auditMetadata ?? {}),
+          if (!existing) {
+            await transaction.auditLog.create({
+              data: {
+                actorUserId: input.identity.user?.id ?? null,
+                action: "vote.cast",
+                entityType: "submission",
+                entityId: input.submissionId,
+                ipHash,
+                metadata: {
+                  channelId: input.channelId,
+                  submissionId: input.submissionId,
+                  memberId: input.membershipId,
+                  choice: input.choice,
+                  ...(input.roundId ? { roundId: input.roundId } : {}),
+                  ...(input.matchupId ? { matchupId: input.matchupId } : {}),
+                  ...(input.auditMetadata ?? {}),
+                },
               },
-            },
-          });
+            });
+          }
 
           return {
             created: existing === null,
+            locked: existing !== null,
+            choice: existing?.choice ?? input.choice,
             winCount,
             lossCount,
             total,

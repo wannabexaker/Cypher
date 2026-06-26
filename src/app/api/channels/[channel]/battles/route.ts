@@ -2,6 +2,7 @@ import {
   ChannelStatus,
   MatchupStatus,
   Prisma,
+  ResultsVisibility,
   RoundStatus,
   SubmissionStatus,
 } from "@prisma/client";
@@ -203,7 +204,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   const channel = await prisma.channel.findUnique({
     where: { code: parsedCode.data },
-    select: { id: true, status: true },
+    select: {
+      id: true,
+      status: true,
+      hostId: true,
+      resultsVisibility: true,
+      completedAt: true,
+    },
   });
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
@@ -220,6 +227,22 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   const identity = await resolveChannelIdentity(request);
   const membership = await findChannelMembership(channel.id, identity);
+  const completed = channel.status === ChannelStatus.COMPLETED;
+
+  const callerIsHostOrModerator =
+    membership?.role === "HOST" ||
+    membership?.role === "MODERATOR" ||
+    Boolean(
+      identity.user &&
+        canManageChannel(identity.user, { hostId: channel.hostId }),
+    );
+
+  const canSeeCounts =
+    channel.resultsVisibility === ResultsVisibility.LIVE ||
+    (channel.resultsVisibility === ResultsVisibility.AFTER_CLOSE && completed) ||
+    (channel.resultsVisibility === ResultsVisibility.HIDDEN && completed) ||
+    callerIsHostOrModerator;
+
   const state = await getBattleState(
     channel.id,
     membership
@@ -231,8 +254,42 @@ export async function GET(request: NextRequest, context: RouteContext) {
       : undefined,
   );
 
+  const rounds = canSeeCounts
+    ? state.rounds
+    : state.rounds.map((round) => ({
+        ...round,
+        matchups: round.matchups.map((matchup) => ({
+          ...matchup,
+          sideA: matchup.sideA
+            ? {
+                ...matchup.sideA,
+                winCount: 0,
+                lossCount: 0,
+                total: 0,
+                winPct: 0,
+              }
+            : null,
+          sideB: matchup.sideB
+            ? {
+                ...matchup.sideB,
+                winCount: 0,
+                lossCount: 0,
+                total: 0,
+                winPct: 0,
+              }
+            : null,
+        })),
+      }));
+
   return NextResponse.json({
     ...state,
+    rounds,
+    resultsHidden: !canSeeCounts,
+    reason: canSeeCounts
+      ? null
+      : channel.resultsVisibility === ResultsVisibility.HIDDEN
+        ? "Results reveal when the host finalizes the room."
+        : "Results reveal when the battle is finalized.",
     member: Boolean(membership),
   });
 }

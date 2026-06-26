@@ -8,6 +8,7 @@ export type ChannelFieldValues = {
   rules?: string | null;
   genre?: string | null;
   visibility: "PUBLIC" | "UNLISTED";
+  resultsVisibility: "LIVE" | "AFTER_CLOSE" | "HIDDEN";
   allowGuestUploads: boolean;
 };
 
@@ -106,6 +107,23 @@ export function ChannelFormFields({ values }: ChannelFormFieldsProps) {
       <label className="flex min-h-14 cursor-pointer items-center gap-3 rounded-md border border-border bg-background px-4 py-3">
         <input
           type="checkbox"
+          name="showResultsLive"
+          defaultChecked={(values?.resultsVisibility ?? "LIVE") === "LIVE"}
+          className="size-5 accent-primary"
+        />
+        <span>
+          <span className="block text-sm font-bold text-foreground">
+            Show results live
+          </span>
+          <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+            When on, room members see live W/L percentages while voting.
+          </span>
+        </span>
+      </label>
+
+      <label className="flex min-h-14 cursor-pointer items-center gap-3 rounded-md border border-border bg-background px-4 py-3">
+        <input
+          type="checkbox"
           name="allowGuestUploads"
           defaultChecked={values?.allowGuestUploads ?? false}
           className="size-5 accent-primary"
@@ -115,7 +133,7 @@ export function ChannelFormFields({ values }: ChannelFormFieldsProps) {
             Allow guest members
           </span>
           <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-            Guests can join with a display name. Track uploads arrive in H04.
+            Guests can join with a display name and can upload tracks if this is enabled.
           </span>
         </span>
       </label>

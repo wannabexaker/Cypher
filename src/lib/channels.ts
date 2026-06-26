@@ -62,6 +62,7 @@ export async function createChannelWithUniqueCode({
     rules?: string;
     genre?: string;
     visibility: "PUBLIC" | "UNLISTED";
+    resultsVisibility: "LIVE" | "AFTER_CLOSE" | "HIDDEN";
     allowGuestUploads: boolean;
   };
 }) {
