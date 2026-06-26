@@ -1,6 +1,7 @@
 import {
   ChannelStatus,
   SubmissionStatus,
+  RoundStatus,
 } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
@@ -79,6 +80,35 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
+  // H13: Check if this channel has a live track voting round
+  const openRound = await prisma.trackVoteRound.findFirst({
+    where: {
+      submissionId: submission.id,
+      status: RoundStatus.VOTING_OPEN,
+    },
+    select: {
+      id: true,
+      closesAt: true,
+      durationSeconds: true,
+    },
+  });
+
+  // If track has a voting round, enforce it; otherwise fall back to channel-wide voting
+  if (openRound) {
+    if (openRound.closesAt && Date.now() >= openRound.closesAt.getTime()) {
+      return NextResponse.json(
+        { error: "Voting has closed for this track round." },
+        { status: 409 },
+      );
+    }
+  } else if (!channel.votingClosesAt || Date.now() >= channel.votingClosesAt.getTime()) {
+    // Channel-wide voting closed
+    return NextResponse.json(
+      { error: "Voting has closed for this room." },
+      { status: 409 },
+    );
+  }
+
   const identity = await resolveChannelIdentity(request);
   const membership = await findChannelMembership(channel.id, identity);
   if (!membership) {
@@ -92,6 +122,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // TODO: replace the basic DB IP cap with a Redis sliding window.
 
   try {
+    // H13: Use track-round-aware dedupe key if a round is open
+    const dedupeKeyForIdentity = (identityKey: string) => {
+      if (openRound) {
+        return `tr:${openRound.id}:${identityKey}`;
+      }
+      return `ch:${channel.id}:s:${submission.id}:${identityKey}`;
+    };
+
     const result = await castWlVote({
       request,
       identity,
@@ -101,8 +139,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       choice: parsed.data.choice,
       fingerprint: parsed.data.fingerprint,
       turnstileToken: parsed.data.turnstileToken,
-      dedupeKeyForIdentity: (identityKey) =>
-        `ch:${channel.id}:s:${submission.id}:${identityKey}`,
+      dedupeKeyForIdentity,
+      trackVoteRoundId: openRound?.id,
       updateAfterVote: async (transaction, counts) => {
         await transaction.submission.update({
           where: { id: submission.id },

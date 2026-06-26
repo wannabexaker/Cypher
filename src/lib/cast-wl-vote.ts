@@ -37,6 +37,7 @@ type CastWlVoteInput = {
   dedupeKeyForIdentity: (identityKey: string) => string;
   roundId?: string;
   matchupId?: string;
+  trackVoteRoundId?: string; // H13: for track round voting
   tallyWhere?: Prisma.VoteWhereInput;
   updateAfterVote?: (
     transaction: Prisma.TransactionClient,
@@ -110,6 +111,7 @@ export async function castWlVote(input: CastWlVoteInput): Promise<CastWlVoteResu
                 submissionId: input.submissionId,
                 roundId: input.roundId,
                 matchupId: input.matchupId,
+                trackVoteRoundId: input.trackVoteRoundId,
                 voterUserId: input.identity.user?.id ?? null,
                 ipHash,
                 fingerprintHash,
@@ -156,6 +158,7 @@ export async function castWlVote(input: CastWlVoteInput): Promise<CastWlVoteResu
                   choice: input.choice,
                   ...(input.roundId ? { roundId: input.roundId } : {}),
                   ...(input.matchupId ? { matchupId: input.matchupId } : {}),
+                  ...(input.trackVoteRoundId ? { trackVoteRoundId: input.trackVoteRoundId } : {}),
                   ...(input.auditMetadata ?? {}),
                 },
               },
