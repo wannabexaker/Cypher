@@ -24,6 +24,7 @@ import { TrackPlayer } from "@/components/submissions/TrackPlayer";
 import { buttonVariants } from "@/components/ui/button";
 import { VoteControl } from "@/components/voting/VoteControl";
 import { VotingCountdown } from "@/components/voting/VotingCountdown";
+import { TrackRoundControl } from "@/components/voting/TrackRoundControl";
 import {
   GUEST_COOKIE_NAME,
   readGuestToken,
@@ -85,7 +86,6 @@ export default async function ChannelRoomPage({ params }: PageProps) {
             userId: user.id,
           },
         },
-        select: { id: true, role: true, participation: true },
       })
     : guestToken
       ? await prisma.channelMember.findUnique({
@@ -95,7 +95,6 @@ export default async function ChannelRoomPage({ params }: PageProps) {
               guestToken,
             },
           },
-          select: { id: true, role: true, participation: true },
         })
       : null;
 
@@ -113,6 +112,23 @@ export default async function ChannelRoomPage({ params }: PageProps) {
         mediaAssetId: true,
         winCount: true,
         lossCount: true,
+        roundResultMode: true, // H13
+        submitterMember: {
+          select: { displayName: true }, // H13: uploader name
+        },
+        trackVoteRounds: {
+          // H13: fetch rounds
+          orderBy: { index: "asc" },
+          select: {
+            id: true,
+            index: true,
+            status: true,
+            durationSeconds: true,
+            openedAt: true,
+            closesAt: true,
+            closedAt: true,
+          },
+        },
       },
     }),
     membership
@@ -371,6 +387,10 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                             {submission.sourceType}
                           </span>
                         </div>
+                        {/* H13: Show uploader name */}
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          By {submission.submitterMember?.displayName ?? "Anonymous"}
+                        </p>
                         {submission.description && (
                           <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
                             {submission.description}
@@ -383,6 +403,16 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                           trackTitle={submission.trackTitle}
                           artistName={submission.artistName}
                         />
+                        {/* H13: Track round controls */}
+                        {membership && (
+                          <TrackRoundControl
+                            submissionId={submission.id}
+                            channelId={channel.id}
+                            membership={membership}
+                            rounds={submission.trackVoteRounds}
+                            roundResultMode={submission.roundResultMode}
+                          />
+                        )}
                         <VoteControl
                           code={channel.code}
                           submissionId={submission.id}
