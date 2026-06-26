@@ -217,6 +217,10 @@ model Channel {
   championSubmissionId String?   @map("champion_submission_id") // winning track once COMPLETED
   completedAt          DateTime? @map("completed_at") // when the host finalized the room
 
+  // H14 retention: auto-purge cutoff = completedAt + 3 days. Cron deletes
+  // channel + MinIO objects once now() >= purgeAfter. Hosts may delete sooner.
+  purgeAfter DateTime? @map("purge_after")
+
   resultsVisibility  ResultsVisibility @default(AFTER_CLOSE) @map("results_visibility")
   voteScope          VoteScope         @default(PER_SUBMISSION) @map("vote_scope")
   maxVotesPerVoter   Int               @default(1) @map("max_votes_per_voter")
