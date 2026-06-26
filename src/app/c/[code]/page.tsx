@@ -110,6 +110,7 @@ export default async function ChannelRoomPage({ params }: PageProps) {
         sourceType: true,
         externalUrl: true,
         mediaAssetId: true,
+        submitterMemberId: true, // H14: needed for FILE playback gate
         winCount: true,
         lossCount: true,
         roundResultMode: true, // H13
@@ -165,6 +166,27 @@ export default async function ChannelRoomPage({ params }: PageProps) {
         })
       : [],
   ]);
+
+  // H14: caller's last 5 submissions (account-wide for users, per-guest-token
+  // for guests). Read-only, member-gated, own rows only.
+  const recentSubmissions = membership
+    ? await prisma.submission.findMany({
+        where: {
+          submitterMember: user
+            ? { userId: user.id }
+            : { guestToken: guestToken ?? "__none__" },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        select: {
+          id: true,
+          trackTitle: true,
+          sourceType: true,
+          externalUrl: true,
+          createdAt: true,
+        },
+      })
+    : [];
 
   const isOpen = channel.status === ChannelStatus.OPEN;
   const completed = channel.status === ChannelStatus.COMPLETED;
@@ -402,6 +424,13 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                           externalUrl={submission.externalUrl}
                           trackTitle={submission.trackTitle}
                           artistName={submission.artistName}
+                          canPlayFile={
+                            // H14: FILE playback locked to host/ADMIN, mods, uploader
+                            Boolean(user && canManageChannel(user, channel)) ||
+                            membership?.role === "MODERATOR" ||
+                            (membership?.id ===
+                              submission.submitterMemberId)
+                          }
                         />
                         {/* H13: Track round controls */}
                         {membership && (
@@ -469,6 +498,12 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                       }
                     : null
                 }
+                recentSubmissions={recentSubmissions.map((entry) => ({
+                  id: entry.id,
+                  trackTitle: entry.trackTitle,
+                  sourceType: entry.sourceType,
+                  externalUrl: entry.externalUrl,
+                }))}
               />
             </div>
           )}

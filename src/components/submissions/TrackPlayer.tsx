@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, Music2, Play, TriangleAlert } from "lucide-react";
+import { Lock, LoaderCircle, Music2, Play, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,9 @@ type TrackPlayerProps = {
   externalUrl?: string | null;
   trackTitle: string;
   artistName: string;
+  // H14: only host/ADMIN, channel MODERATORs, and the uploader may play FILE
+  // tracks. Embeds (Spotify/SoundCloud) are public and ignore this flag.
+  canPlayFile?: boolean;
 };
 
 const IFRAME_SANDBOX = "allow-scripts allow-same-origin allow-popups allow-presentation";
@@ -84,6 +87,7 @@ export function TrackPlayer({
   externalUrl,
   trackTitle,
   artistName,
+  canPlayFile = true,
 }: TrackPlayerProps) {
   const title = `${artistName} — ${trackTitle}`;
 
@@ -93,6 +97,14 @@ export function TrackPlayer({
         <p className="mt-4 inline-flex items-center gap-2 text-sm text-muted-foreground">
           <TriangleAlert className="size-4" />
           Audio is unavailable.
+        </p>
+      );
+    }
+    if (!canPlayFile) {
+      return (
+        <p className="mt-4 inline-flex items-center gap-2 rounded-md border border-border bg-background/60 px-3 py-2 text-sm text-muted-foreground">
+          <Lock className="size-4 text-magenta" aria-hidden="true" />
+          Only the host, moderators, and the artist can play uploaded tracks.
         </p>
       );
     }
