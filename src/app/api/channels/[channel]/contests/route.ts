@@ -4,13 +4,18 @@ import {
   ContestStatus,
   MatchupStatus,
   Prisma,
+  ResultsVisibility,
   RoundStatus,
   SubmissionStatus,
 } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { canModerateChannel } from "@/lib/channels";
+import { canManageChannel, canModerateChannel } from "@/lib/channels";
 import { getActiveContest } from "@/lib/contests";
+import {
+  findChannelMembership,
+  resolveChannelIdentity,
+} from "@/lib/membership";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { createContestSchema } from "@/lib/validation/contest";
@@ -112,64 +117,95 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    const result = await prisma.$transaction(async (transaction) => {
-      const contest = await transaction.contest.create({
-        data: {
-          channelId: channel.id,
-          mode: ContestMode.LEADERBOARD,
-          status: ContestStatus.VOTING_OPEN,
+    try {
+      const result = await prisma.$transaction(
+        async (transaction) => {
+          // H17 item 5: re-check the single-active-contest invariant inside
+          // the transaction (mirrors the BATTLE branch's stillActive guard) so
+          // two simultaneous LEADERBOARD POSTs cannot both win the precheck.
+          const stillActive = await transaction.contest.findFirst({
+            where: {
+              channelId: channel.id,
+              status: { in: [ContestStatus.DRAFT, ContestStatus.VOTING_OPEN] },
+            },
+            select: { id: true },
+          });
+          if (stillActive) {
+            throw new ContestAlreadyActiveError();
+          }
+
+          const contest = await transaction.contest.create({
+            data: {
+              channelId: channel.id,
+              mode: ContestMode.LEADERBOARD,
+              status: ContestStatus.VOTING_OPEN,
+            },
+            select: { id: true, mode: true, status: true, createdAt: true },
+          });
+
+          await transaction.contestParticipant.createMany({
+            data: approved.map((submission) => ({
+              contestId: contest.id,
+              submissionId: submission.id,
+              wins: 0,
+              losses: 0,
+            })),
+          });
+
+          // Reset the denormalised live counters so the new contest starts at 0
+          // votes. ContestParticipant.wins/losses is the authoritative per-contest
+          // record; the Submission mirror just powers UI on the active contest.
+          await transaction.submission.updateMany({
+            where: { channelId: channel.id, status: SubmissionStatus.APPROVED },
+            data: { winCount: 0, lossCount: 0, voteCount: 0 },
+          });
+
+          await transaction.channel.update({
+            where: { id: channel.id },
+            data: { lastActivityAt: new Date() },
+          });
+
+          await transaction.auditLog.create({
+            data: {
+              actorUserId: user.id,
+              action: "contest.create",
+              entityType: "contest",
+              entityId: contest.id,
+              metadata: {
+                channelId: channel.id,
+                mode: ContestMode.LEADERBOARD,
+                participants: approved.length,
+              },
+            },
+          });
+
+          return contest;
         },
-        select: { id: true, mode: true, status: true, createdAt: true },
-      });
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
 
-      await transaction.contestParticipant.createMany({
-        data: approved.map((submission) => ({
-          contestId: contest.id,
-          submissionId: submission.id,
-          wins: 0,
-          losses: 0,
-        })),
-      });
-
-      // Reset the denormalised live counters so the new contest starts at 0
-      // votes. ContestParticipant.wins/losses is the authoritative per-contest
-      // record; the Submission mirror just powers UI on the active contest.
-      await transaction.submission.updateMany({
-        where: { channelId: channel.id, status: SubmissionStatus.APPROVED },
-        data: { winCount: 0, lossCount: 0, voteCount: 0 },
-      });
-
-      await transaction.channel.update({
-        where: { id: channel.id },
-        data: { lastActivityAt: new Date() },
-      });
-
-      await transaction.auditLog.create({
-        data: {
-          actorUserId: user.id,
-          action: "contest.create",
-          entityType: "contest",
-          entityId: contest.id,
-          metadata: {
-            channelId: channel.id,
-            mode: ContestMode.LEADERBOARD,
-            participants: approved.length,
-          },
+      return NextResponse.json(
+        {
+          id: result.id,
+          mode: result.mode,
+          status: result.status,
+          createdAt: result.createdAt,
         },
-      });
-
-      return contest;
-    });
-
-    return NextResponse.json(
-      {
-        id: result.id,
-        mode: result.mode,
-        status: result.status,
-        createdAt: result.createdAt,
-      },
-      { status: 201 },
-    );
+        { status: 201 },
+      );
+    } catch (error) {
+      if (error instanceof ContestAlreadyActiveError) {
+        return NextResponse.json(
+          { error: "A contest is already running in this room." },
+          { status: 409 },
+        );
+      }
+      console.error("Contest create failed", error);
+      return NextResponse.json(
+        { error: "Unable to start the contest right now." },
+        { status: 500 },
+      );
+    }
   }
 
   // BATTLE branch.
@@ -357,4 +393,105 @@ export async function POST(request: NextRequest, context: RouteContext) {
       { status: 500 },
     );
   }
+}
+
+// H17 item 3: public list of every contest that ever ran in a channel
+// (newest first). Accepts the channel id OR the 6-char code so the public
+// room page and the dashboard can both hit it. Results visibility gating
+// mirrors GET /results — non-mod callers see no championSubmissionId /
+// championTitle when the channel hides results for that contest.
+export async function GET(request: NextRequest, context: RouteContext) {
+  const { channel: channelKey } = await context.params;
+  if (!channelKey) {
+    return NextResponse.json({ error: "Channel not found." }, { status: 404 });
+  }
+
+  const channel = await prisma.channel.findFirst({
+    where: { OR: [{ id: channelKey }, { code: channelKey.toUpperCase() }] },
+    select: {
+      id: true,
+      hostId: true,
+      status: true,
+      resultsVisibility: true,
+      completedAt: true,
+      votingClosesAt: true,
+    },
+  });
+  if (!channel) {
+    return NextResponse.json({ error: "Channel not found." }, { status: 404 });
+  }
+
+  const identity = await resolveChannelIdentity(request);
+  const membership = await findChannelMembership(channel.id, identity);
+  const callerIsHostOrModerator =
+    membership?.role === "HOST" ||
+    membership?.role === "MODERATOR" ||
+    Boolean(
+      identity.user && canManageChannel(identity.user, { hostId: channel.hostId }),
+    );
+
+  const contests = await prisma.contest.findMany({
+    where: { channelId: channel.id },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      mode: true,
+      status: true,
+      bracketSize: true,
+      createdAt: true,
+      completedAt: true,
+      championSubmissionId: true,
+    },
+  });
+
+  const championIds = Array.from(
+    new Set(
+      contests
+        .map((contest) => contest.championSubmissionId)
+        .filter((id): id is string => typeof id === "string"),
+    ),
+  );
+  const championRows = championIds.length
+    ? await prisma.submission.findMany({
+        where: { id: { in: championIds } },
+        select: { id: true, trackTitle: true },
+      })
+    : [];
+  const championTitleById = new Map(
+    championRows.map((row) => [row.id, row.trackTitle]),
+  );
+
+  const channelCompleted = channel.status === ChannelStatus.COMPLETED;
+  const votingClosed = Boolean(
+    channel.votingClosesAt && Date.now() >= channel.votingClosesAt.getTime(),
+  );
+
+  const items = contests.map((contest) => {
+    const contestCompleted = contest.status === ContestStatus.COMPLETED;
+    // A contest's champion is "visible" when the channel-level visibility rule
+    // would expose results for THIS contest. Hidden until completion under
+    // HIDDEN; until close (or completion) under AFTER_CLOSE; always under LIVE.
+    const visible =
+      callerIsHostOrModerator ||
+      channel.resultsVisibility === ResultsVisibility.LIVE ||
+      (channel.resultsVisibility === ResultsVisibility.AFTER_CLOSE &&
+        (votingClosed || contestCompleted || channelCompleted)) ||
+      (channel.resultsVisibility === ResultsVisibility.HIDDEN && contestCompleted);
+
+    return {
+      id: contest.id,
+      mode: contest.mode,
+      status: contest.status,
+      bracketSize: contest.bracketSize,
+      createdAt: contest.createdAt.toISOString(),
+      completedAt: contest.completedAt ? contest.completedAt.toISOString() : null,
+      championSubmissionId: visible ? contest.championSubmissionId : null,
+      championTitle:
+        visible && contest.championSubmissionId
+          ? championTitleById.get(contest.championSubmissionId) ?? null
+          : null,
+    };
+  });
+
+  return NextResponse.json({ contests: items });
 }

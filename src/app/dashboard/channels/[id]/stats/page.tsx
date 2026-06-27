@@ -5,10 +5,11 @@ import { ContestMode, SubmissionStatus } from "@prisma/client";
 import { ArrowLeft, Crown, ShieldCheck } from "lucide-react";
 
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
+import { PodiumTop3 } from "@/components/contests/PodiumTop3";
 import { buttonVariants } from "@/components/ui/button";
 import { getBattleState } from "@/lib/battles";
 import { canManageChannel } from "@/lib/channels";
-import { getLatestCompletedContest } from "@/lib/contests";
+import { getLatestCompletedContest, parseRankingSnapshot } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { compareWinRatio, getVoteSplit } from "@/lib/votes";
@@ -263,6 +264,50 @@ export default async function ChannelStatsPage({ params, searchParams }: PagePro
 
   const qualifyingVoteTotal = rankedTracks.reduce((sum, track) => sum + track.total, 0);
 
+  // H17 item 2: stats-page podium. Prefer the latest completed leaderboard
+  // contest's frozen snapshot; otherwise fall back to the live W%-ranked top 3
+  // so a still-running room still shows a meaningful placeholder.
+  const statsPodiumSourceById = new Map(
+    rankedTracks.map((track) => [
+      track.id,
+      {
+        artistName: track.artistName,
+        trackTitle: track.trackTitle,
+        wins: track.winCount,
+        losses: track.lossCount,
+        winPct: track.winPct,
+      },
+    ]),
+  );
+  const snapshotEntries = parseRankingSnapshot(
+    latestLeaderboardContest?.rankingSnapshot ?? null,
+  );
+  const statsPodiumEntries =
+    snapshotEntries.length > 0
+      ? snapshotEntries
+          .slice(0, 3)
+          .map((entry) => {
+            const source = statsPodiumSourceById.get(entry.submissionId);
+            if (!source) return null;
+            return {
+              rank: entry.rank,
+              artistName: source.artistName,
+              trackTitle: source.trackTitle,
+              winPct: Math.round(entry.winPct * 100),
+              wins: entry.wins,
+              losses: entry.losses,
+            };
+          })
+          .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+      : rankedTracks.slice(0, 3).map((track, index) => ({
+          rank: index + 1,
+          artistName: track.artistName,
+          trackTitle: track.trackTitle,
+          winPct: track.winPct,
+          wins: track.winCount,
+          losses: track.lossCount,
+        }));
+
   const hourBuckets = new Map<string, { at: Date; total: number }>();
   for (const event of qualifyingVoteEvents) {
     const hour = formatHourBucket(event.createdAt);
@@ -419,7 +464,16 @@ export default async function ChannelStatsPage({ params, searchParams }: PagePro
       <section className="mt-6 grid gap-6 xl:grid-cols-2">
         <article className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-6">
           <h2 className="text-xl font-bold text-foreground">Results</h2>
-          {effectiveCompleted && champion ? (
+          {effectiveCompleted && statsPodiumEntries.length > 0 ? (
+            <div className="mt-4">
+              <PodiumTop3
+                entries={statsPodiumEntries}
+                showCounts
+                completedAt={effectiveCompletedAt}
+                heading={null}
+              />
+            </div>
+          ) : effectiveCompleted && champion ? (
             <div className="mt-4 rounded-lg border border-lime/30 bg-lime/10 p-4">
               <p className="inline-flex items-center gap-2 font-mono text-[0.6875rem] font-bold tracking-[0.12em] text-lime uppercase">
                 <Crown className="size-3.5" />

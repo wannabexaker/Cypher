@@ -14,6 +14,10 @@ import { ChampionBanner } from "@/components/channels/ChampionBanner";
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { JoinRoomPanel } from "@/components/channels/JoinRoomPanel";
+import { LeaderboardRankings } from "@/components/contests/LeaderboardRankings";
+import { ModeStandingsTable } from "@/components/contests/ModeStandingsTable";
+import { PastContestsBrowser } from "@/components/contests/PastContestsBrowser";
+import { PodiumTop3 } from "@/components/contests/PodiumTop3";
 import { PushOptIn } from "@/components/notifications/PushOptIn";
 import { RoomBanner } from "@/components/notifications/RoomBanner";
 import {
@@ -33,7 +37,11 @@ import {
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { canManageChannel } from "@/lib/channels";
-import { getLatestCompletedContest } from "@/lib/contests";
+import {
+  getLatestCompletedContest,
+  getModeStandings,
+  parseRankingSnapshot,
+} from "@/lib/contests";
 import { channelCodeSchema } from "@/lib/validation/channels";
 import { compareWinRatio, getVoteSplit } from "@/lib/votes";
 
@@ -252,6 +260,105 @@ export default async function ChannelRoomPage({ params }: PageProps) {
       : undefined;
   const championSplit = champion ? getVoteSplit(champion) : null;
 
+  // H17 item 2: derive the top-3 podium from the latest completed leaderboard
+  // contest's rankingSnapshot when available. Fall back to ChampionBanner for
+  // legacy rooms without a contest record.
+  const submissionsById = new Map(
+    approvedSubmissions.map((submission) => [submission.id, submission]),
+  );
+  const rankingSnapshotEntries = parseRankingSnapshot(
+    latestContest?.rankingSnapshot ?? null,
+  );
+  const podiumEntries = rankingSnapshotEntries
+    .slice(0, 3)
+    .map((entry) => {
+      const submission = submissionsById.get(entry.submissionId);
+      if (!submission) return null;
+      return {
+        rank: entry.rank,
+        artistName: submission.artistName,
+        trackTitle: submission.trackTitle,
+        // rankingSnapshot stores a 0..1 fraction — multiply for display.
+        winPct: Math.round(entry.winPct * 100),
+        wins: entry.wins,
+        losses: entry.losses,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+
+  // H17 item 1: rankings entries — frozen from snapshot when the contest is
+  // completed, otherwise live from rankedSubmissions (already W%-sorted).
+  const liveLeaderboardEntries =
+    rankingSnapshotEntries.length > 0
+      ? rankingSnapshotEntries
+          .map((entry) => {
+            const submission = submissionsById.get(entry.submissionId);
+            if (!submission) return null;
+            return {
+              submissionId: entry.submissionId,
+              rank: entry.rank,
+              artistName: submission.artistName,
+              trackTitle: submission.trackTitle,
+              winPct: Math.round(entry.winPct * 100),
+              wins: entry.wins,
+              losses: entry.losses,
+            };
+          })
+          .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+      : rankedSubmissions.map((submission, index) => {
+          const split = getVoteSplit(submission);
+          return {
+            submissionId: submission.id,
+            rank: index + 1,
+            artistName: submission.artistName,
+            trackTitle: submission.trackTitle,
+            // getVoteSplit returns winPct as integer 0..100 already.
+            winPct: split.winPct,
+            wins: submission.winCount,
+            losses: submission.lossCount,
+          };
+        });
+
+  // H17 item 4: per-mode all-time standings. Cheap — one query per mode —
+  // and only completed contests count, so the rows are stable.
+  const [battleStandings, leaderboardStandings] = await Promise.all([
+    getModeStandings(prisma, channel.id, ContestMode.BATTLE),
+    getModeStandings(prisma, channel.id, ContestMode.LEADERBOARD),
+  ]);
+  const standingsSubmissionIds = new Set<string>();
+  for (const row of battleStandings) standingsSubmissionIds.add(row.submissionId);
+  for (const row of leaderboardStandings)
+    standingsSubmissionIds.add(row.submissionId);
+  const standingsSubmissions = standingsSubmissionIds.size
+    ? await prisma.submission.findMany({
+        where: { id: { in: [...standingsSubmissionIds] } },
+        select: { id: true, artistName: true, trackTitle: true },
+      })
+    : [];
+  const standingsLookup = new Map(
+    standingsSubmissions.map((row) => [row.id, row]),
+  );
+  const decorateStandings = (
+    rows: Awaited<ReturnType<typeof getModeStandings>>,
+  ) =>
+    rows.map((row) => {
+      const submission = standingsLookup.get(row.submissionId);
+      const denom = row.wins + row.losses;
+      return {
+        submissionId: row.submissionId,
+        artistName: submission?.artistName ?? "Unknown",
+        trackTitle: submission?.trackTitle ?? "Unknown",
+        wins: row.wins,
+        losses: row.losses,
+        contests: row.contests,
+        championships: row.championships,
+        bestRank: row.bestRank,
+        winPct: denom === 0 ? 0 : Math.round((row.wins / denom) * 100),
+      };
+    });
+  const battleStandingsRows = decorateStandings(battleStandings);
+  const leaderboardStandingsRows = decorateStandings(leaderboardStandings);
+
   const choices = new Map<string, "WIN" | "LOSS">();
   for (const vote of ownVotes) {
     if (!choices.has(vote.submissionId)) {
@@ -330,16 +437,28 @@ export default async function ChannelRoomPage({ params }: PageProps) {
         </div>
       </section>
 
-      {champion && championSplit && (
+      {effectiveCompleted && podiumEntries.length > 0 ? (
         <div className="section-shell pt-6">
-          <ChampionBanner
-            artistName={champion.artistName}
-            trackTitle={champion.trackTitle}
-            winPct={championSplit.winPct}
-            total={championSplit.total}
+          <PodiumTop3
+            entries={podiumEntries}
+            showCounts={canSeeCounts}
             completedAt={effectiveCompletedAt}
+            heading="Podium"
           />
         </div>
+      ) : (
+        champion &&
+        championSplit && (
+          <div className="section-shell pt-6">
+            <ChampionBanner
+              artistName={champion.artistName}
+              trackTitle={champion.trackTitle}
+              winPct={championSplit.winPct}
+              total={championSplit.total}
+              completedAt={effectiveCompletedAt}
+            />
+          </div>
+        )
       )}
 
       {channel.votingClosesAt && (
@@ -477,6 +596,32 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                   })}
                 </ul>
               )}
+            </section>
+
+            <section className="rounded-xl border border-border bg-elevated p-6 space-y-6">
+              <div className="flex items-center gap-3">
+                <Crown
+                  className="size-6 text-primary-glow"
+                  aria-hidden="true"
+                />
+                <h3 className="text-lg font-bold text-foreground">Results</h3>
+              </div>
+              <LeaderboardRankings
+                entries={liveLeaderboardEntries}
+                canSeeCounts={canSeeCounts}
+                countsHiddenLabel={countsHiddenLabel}
+              />
+              <PastContestsBrowser channelKey={channel.code} />
+              <div className="grid gap-6 lg:grid-cols-2">
+                <ModeStandingsTable
+                  title="Battle standings"
+                  rows={battleStandingsRows}
+                />
+                <ModeStandingsTable
+                  title="Leaderboard standings"
+                  rows={leaderboardStandingsRows}
+                />
+              </div>
             </section>
           </div>
         </div>

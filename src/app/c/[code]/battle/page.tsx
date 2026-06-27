@@ -8,6 +8,7 @@ import { Flag, Trophy } from "lucide-react";
 import { ChampionBanner } from "@/components/channels/ChampionBanner";
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { JoinRoomPanel } from "@/components/channels/JoinRoomPanel";
+import { PodiumTop3 } from "@/components/contests/PodiumTop3";
 import { buttonVariants } from "@/components/ui/button";
 import { VoteControl } from "@/components/voting/VoteControl";
 import { getBattleState } from "@/lib/battles";
@@ -142,6 +143,101 @@ export default async function BattleBracketPage({ params }: PageProps) {
   const turnstileSiteKey =
     process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() || undefined;
 
+  // H17 item 2: derive a bracket podium from the final two rounds. Champion =
+  // final-round winner; runner-up = final loser; bronze = the losers of the
+  // semifinal round. Falls back gracefully when the bracket has <3 unique
+  // entrants.
+  type BattlePodiumDraft = {
+    submissionId: string;
+    rank: number;
+    sideStats: { winCount: number; lossCount: number; winPct: number } | null;
+  };
+  const battlePodiumDraft: BattlePodiumDraft[] = [];
+  if (battleCompleted && battle.rounds.length > 0) {
+    const finalRound = battle.rounds[battle.rounds.length - 1];
+    const finalMatchup = finalRound.matchups.find(
+      (matchup) => matchup.winnerSubmissionId !== null,
+    );
+    if (finalMatchup && finalMatchup.winnerSubmissionId) {
+      const winnerId = finalMatchup.winnerSubmissionId;
+      const winnerSide =
+        finalMatchup.submissionA.id === winnerId
+          ? finalMatchup.sideA
+          : finalMatchup.sideB;
+      battlePodiumDraft.push({
+        submissionId: winnerId,
+        rank: 1,
+        sideStats: winnerSide ?? null,
+      });
+      const runnerUp =
+        finalMatchup.submissionA.id === winnerId
+          ? finalMatchup.submissionB
+          : finalMatchup.submissionA;
+      const runnerUpSide =
+        finalMatchup.submissionA.id === winnerId
+          ? finalMatchup.sideB
+          : finalMatchup.sideA;
+      if (runnerUp) {
+        battlePodiumDraft.push({
+          submissionId: runnerUp.id,
+          rank: 2,
+          sideStats: runnerUpSide ?? null,
+        });
+      }
+    }
+    if (battle.rounds.length >= 2) {
+      const semis = battle.rounds[battle.rounds.length - 2];
+      for (const matchup of semis.matchups) {
+        if (!matchup.winnerSubmissionId) continue;
+        const loser =
+          matchup.submissionA.id === matchup.winnerSubmissionId
+            ? matchup.submissionB
+            : matchup.submissionA;
+        const loserSide =
+          matchup.submissionA.id === matchup.winnerSubmissionId
+            ? matchup.sideB
+            : matchup.sideA;
+        if (!loser) continue;
+        battlePodiumDraft.push({
+          submissionId: loser.id,
+          rank: 3,
+          sideStats: loserSide ?? null,
+        });
+      }
+    }
+  }
+  const battlePodiumIds = Array.from(
+    new Set(battlePodiumDraft.map((entry) => entry.submissionId)),
+  );
+  const battlePodiumSubmissions =
+    battlePodiumIds.length > 0
+      ? await prisma.submission.findMany({
+          where: { id: { in: battlePodiumIds } },
+          select: { id: true, artistName: true, trackTitle: true },
+        })
+      : [];
+  const battlePodiumByid = new Map(
+    battlePodiumSubmissions.map((submission) => [submission.id, submission]),
+  );
+  const seenBattlePodium = new Set<string>();
+  const battlePodiumEntries = battlePodiumDraft
+    .map((draft) => {
+      if (seenBattlePodium.has(draft.submissionId)) return null;
+      seenBattlePodium.add(draft.submissionId);
+      const submission = battlePodiumByid.get(draft.submissionId);
+      if (!submission) return null;
+      return {
+        rank: draft.rank,
+        artistName: submission.artistName,
+        trackTitle: submission.trackTitle,
+        winPct: draft.sideStats?.winPct ?? 0,
+        wins: draft.sideStats?.winCount ?? 0,
+        losses: draft.sideStats?.lossCount ?? 0,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .slice(0, 3);
+
   return (
     <main className="min-h-svh bg-background">
       <header className="border-b border-border bg-background/90">
@@ -181,16 +277,27 @@ export default async function BattleBracketPage({ params }: PageProps) {
         </p>
       </section>
 
-      {battleCompleted && champion && championSplit && (
+      {battleCompleted && battlePodiumEntries.length > 0 ? (
         <div className="section-shell pb-6">
-          <ChampionBanner
-            artistName={champion.artistName}
-            trackTitle={champion.trackTitle}
-            winPct={championSplit.winPct}
-            total={championSplit.total}
+          <PodiumTop3
+            entries={battlePodiumEntries}
+            showCounts={canSeeCounts}
             completedAt={effectiveCompletedAt}
+            heading="Bracket podium"
           />
         </div>
+      ) : (
+        battleCompleted && champion && championSplit && (
+          <div className="section-shell pb-6">
+            <ChampionBanner
+              artistName={champion.artistName}
+              trackTitle={champion.trackTitle}
+              winPct={championSplit.winPct}
+              total={championSplit.total}
+              completedAt={effectiveCompletedAt}
+            />
+          </div>
+        )
       )}
 
       <section className="section-shell grid gap-8 pb-12 lg:grid-cols-[minmax(0,1fr)_20rem]">

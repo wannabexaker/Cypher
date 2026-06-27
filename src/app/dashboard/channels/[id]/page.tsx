@@ -31,12 +31,14 @@ import { ContestStartControl } from "@/components/channels/ContestStartControl";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { ManageChannelForm } from "@/components/channels/ManageChannelForm";
 import { MemberRoleControl } from "@/components/channels/MemberRoleControl";
+import { PodiumTop3 } from "@/components/contests/PodiumTop3";
 import { ModerationQueue } from "@/components/submissions/ModerationQueue";
 import { buttonVariants } from "@/components/ui/button";
 import { canManageChannel } from "@/lib/channels";
 import {
   getActiveContest,
   getLatestCompletedContest,
+  parseRankingSnapshot,
 } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
@@ -191,6 +193,33 @@ export default async function ManageChannelPage({ params }: PageProps) {
         (track) => track.id === effectiveChampionId,
       )?.label ?? null)
     : null;
+
+  // H17 item 2: derive a top-3 podium for the dashboard from the latest
+  // completed leaderboard contest's frozen rankingSnapshot. winPct in the
+  // snapshot is a fraction (0..1) — multiply ×100 for display.
+  const podiumSourceById = new Map(
+    approvedTracks.map((track) => [
+      track.id,
+      { artistName: track.artistName, trackTitle: track.trackTitle },
+    ]),
+  );
+  const dashboardPodium = parseRankingSnapshot(
+    latestLeaderboardContest?.rankingSnapshot ?? null,
+  )
+    .slice(0, 3)
+    .map((entry) => {
+      const source = podiumSourceById.get(entry.submissionId);
+      if (!source) return null;
+      return {
+        rank: entry.rank,
+        artistName: source.artistName,
+        trackTitle: source.trackTitle,
+        winPct: Math.round(entry.winPct * 100),
+        wins: entry.wins,
+        losses: entry.losses,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
   const moderationQueue = pendingSubmissions.map((submission) => ({
     id: submission.id,
@@ -376,6 +405,16 @@ export default async function ManageChannelPage({ params }: PageProps) {
                 contestCompleted={contestCompleted}
               />
             </div>
+            {dashboardPodium.length > 0 && (
+              <div className="mt-6">
+                <PodiumTop3
+                  entries={dashboardPodium}
+                  showCounts
+                  completedAt={latestLeaderboardContest?.completedAt ?? null}
+                  heading="Latest leaderboard podium"
+                />
+              </div>
+            )}
           </section>
 
           <section className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-7">

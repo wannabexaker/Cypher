@@ -269,3 +269,142 @@ export async function runLeaderboardFinalize(
     rankingSnapshot,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// H17 — results presentation helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Defensive parser for Contest.rankingSnapshot. The column is Json? and rows
+// from older contests may legitimately be null/empty. Anything that doesn't
+// match the documented shape is dropped so the UI never crashes on a stale or
+// hand-edited row. NB: rankingSnapshot[].winPct is a FRACTION (0..1).
+export function parseRankingSnapshot(value: unknown): RankingSnapshotEntry[] {
+  if (!Array.isArray(value)) return [];
+  const entries: RankingSnapshotEntry[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const record = raw as Record<string, unknown>;
+    const submissionId = record.submissionId;
+    const rank = record.rank;
+    const wins = record.wins;
+    const losses = record.losses;
+    const winPct = record.winPct;
+    if (
+      typeof submissionId !== "string" ||
+      typeof rank !== "number" ||
+      typeof wins !== "number" ||
+      typeof losses !== "number" ||
+      typeof winPct !== "number"
+    ) {
+      continue;
+    }
+    entries.push({ submissionId, rank, wins, losses, winPct });
+  }
+  return entries.sort((a, b) => a.rank - b.rank);
+}
+
+// H17: a single shape both medal podium and rankings UI consume. `winPct` is
+// the FRACTION (0..1) straight from the snapshot — callers ×100 to render.
+export type PodiumEntry = {
+  rank: number;
+  submissionId: string;
+  wins: number;
+  losses: number;
+  winPct: number;
+};
+
+// Return the top 3 entries from a rankingSnapshot, padded down if there are
+// fewer than 3 participants (UI keeps a graceful fallback rather than 404'ing).
+export function getContestPodium(
+  snapshot: RankingSnapshotEntry[],
+  limit = 3,
+): PodiumEntry[] {
+  return snapshot.slice(0, limit).map((entry) => ({
+    rank: entry.rank,
+    submissionId: entry.submissionId,
+    wins: entry.wins,
+    losses: entry.losses,
+    winPct: entry.winPct,
+  }));
+}
+
+// H17 item 4: per-mode "all-time" standings for a channel. Aggregates
+// ContestParticipant rows joined to COMPLETED contests of the requested mode
+// — a song that participated in both BATTLE and LEADERBOARD contests gets two
+// independent records (callers render two tables side-by-side).
+export type ModeStandingsRow = {
+  submissionId: string;
+  wins: number;
+  losses: number;
+  contests: number;
+  championships: number;
+  bestRank: number | null;
+};
+
+export async function getModeStandings(
+  db: Db,
+  channelId: string,
+  mode: ContestMode,
+): Promise<ModeStandingsRow[]> {
+  const completed = await db.contest.findMany({
+    where: {
+      channelId,
+      mode,
+      status: ContestStatus.COMPLETED,
+    },
+    select: {
+      championSubmissionId: true,
+      participants: {
+        select: {
+          submissionId: true,
+          wins: true,
+          losses: true,
+          rank: true,
+        },
+      },
+    },
+  });
+
+  const acc = new Map<string, ModeStandingsRow>();
+  for (const contest of completed) {
+    for (const participant of contest.participants) {
+      const existing = acc.get(participant.submissionId) ?? {
+        submissionId: participant.submissionId,
+        wins: 0,
+        losses: 0,
+        contests: 0,
+        championships: 0,
+        bestRank: null as number | null,
+      };
+      existing.wins += participant.wins;
+      existing.losses += participant.losses;
+      existing.contests += 1;
+      if (
+        contest.championSubmissionId &&
+        contest.championSubmissionId === participant.submissionId
+      ) {
+        existing.championships += 1;
+      }
+      if (
+        typeof participant.rank === "number" &&
+        (existing.bestRank === null || participant.rank < existing.bestRank)
+      ) {
+        existing.bestRank = participant.rank;
+      }
+      acc.set(participant.submissionId, existing);
+    }
+  }
+
+  return [...acc.values()].sort((a, b) => {
+    const ratioOrder = compareWinRatio(
+      { winCount: b.wins, lossCount: b.losses },
+      { winCount: a.wins, lossCount: a.losses },
+    );
+    if (ratioOrder !== 0) return ratioOrder;
+    if (b.championships !== a.championships) {
+      return b.championships - a.championships;
+    }
+    if (b.contests !== a.contests) return b.contests - a.contests;
+    return a.submissionId.localeCompare(b.submissionId);
+  });
+}
