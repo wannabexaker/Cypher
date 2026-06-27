@@ -123,23 +123,44 @@ export function TrackPlayer({
   }
 
   const isSpotify = sourceType === "SPOTIFY";
+  const isYouTube = sourceType === "YOUTUBE";
+  const providerLabel = isSpotify
+    ? "Spotify"
+    : isYouTube
+      ? "YouTube"
+      : "SoundCloud";
 
   return (
     <div className="mt-4 overflow-hidden rounded-lg border border-border bg-background">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
         <Music2 className="size-3.5 text-magenta" />
-        {isSpotify ? "Spotify" : "SoundCloud"}
+        {providerLabel}
       </div>
-      <iframe
-        title={title}
-        src={embedUrl}
-        loading="lazy"
-        sandbox={IFRAME_SANDBOX}
-        allow="encrypted-media; clipboard-write; picture-in-picture"
-        className="w-full"
-        height={isSpotify ? 152 : 166}
-        style={{ border: 0 }}
-      />
+      {isYouTube ? (
+        <div className="relative w-full" style={{ aspectRatio: "16 / 9" }}>
+          <iframe
+            title={title}
+            src={embedUrl}
+            loading="lazy"
+            sandbox={IFRAME_SANDBOX}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            className="absolute inset-0 h-full w-full"
+            style={{ border: 0 }}
+          />
+        </div>
+      ) : (
+        <iframe
+          title={title}
+          src={embedUrl}
+          loading="lazy"
+          sandbox={IFRAME_SANDBOX}
+          allow="encrypted-media; clipboard-write; picture-in-picture"
+          className="w-full"
+          height={isSpotify ? 152 : 166}
+          style={{ border: 0 }}
+        />
+      )}
     </div>
   );
 }

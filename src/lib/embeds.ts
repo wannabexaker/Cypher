@@ -2,7 +2,7 @@
 // be bundled into the client <TrackPlayer>. Only official hosts are accepted and
 // every produced iframe src is re-validated here (defense in depth vs SSRF/XSS).
 
-export type EmbedSourceType = "SPOTIFY" | "SOUNDCLOUD";
+export type EmbedSourceType = "SPOTIFY" | "SOUNDCLOUD" | "YOUTUBE";
 
 export type ClassifiedEmbed = {
   sourceType: EmbedSourceType;
@@ -12,6 +12,14 @@ export type ClassifiedEmbed = {
 const SPOTIFY_HOSTS = new Set(["open.spotify.com"]);
 const SOUNDCLOUD_FULL_HOSTS = new Set(["soundcloud.com", "www.soundcloud.com"]);
 const SOUNDCLOUD_SHORT_HOST = "on.soundcloud.com";
+
+const YOUTUBE_WATCH_HOSTS = new Set([
+  "youtube.com",
+  "www.youtube.com",
+  "m.youtube.com",
+  "music.youtube.com",
+]);
+const YOUTUBE_SHORT_HOST = "youtu.be";
 
 const SPOTIFY_TYPES = new Set([
   "track",
@@ -23,6 +31,41 @@ const SPOTIFY_TYPES = new Set([
 
 const SPOTIFY_ID = /^[A-Za-z0-9]+$/;
 const SOUNDCLOUD_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
+
+function extractYoutubeId(url: URL): string | null {
+  const host = url.hostname.toLowerCase();
+
+  if (host === YOUTUBE_SHORT_HOST) {
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length !== 1) return null;
+    return YOUTUBE_ID.test(segments[0]) ? segments[0] : null;
+  }
+
+  if (YOUTUBE_WATCH_HOSTS.has(host)) {
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length === 0) {
+      const id = url.searchParams.get("v");
+      return id && YOUTUBE_ID.test(id) ? id : null;
+    }
+    // /watch?v=<id>
+    if (segments[0] === "watch" && segments.length === 1) {
+      const id = url.searchParams.get("v");
+      return id && YOUTUBE_ID.test(id) ? id : null;
+    }
+    // /shorts/<id>
+    if (segments[0] === "shorts" && segments.length === 2) {
+      return YOUTUBE_ID.test(segments[1]) ? segments[1] : null;
+    }
+    // /embed/<id> — accept so a normalized share link round-trips cleanly.
+    if (segments[0] === "embed" && segments.length === 2) {
+      return YOUTUBE_ID.test(segments[1]) ? segments[1] : null;
+    }
+    return null;
+  }
+
+  return null;
+}
 
 function parseHttpsUrl(rawUrl: string): URL | null {
   let url: URL;
@@ -78,6 +121,15 @@ export function classifyEmbedUrl(rawUrl: string): ClassifiedEmbed | null {
     };
   }
 
+  if (YOUTUBE_WATCH_HOSTS.has(host) || host === YOUTUBE_SHORT_HOST) {
+    const id = extractYoutubeId(url);
+    if (!id) return null;
+    return {
+      sourceType: "YOUTUBE",
+      normalizedUrl: `https://www.youtube.com/watch?v=${id}`,
+    };
+  }
+
   return null;
 }
 
@@ -109,6 +161,14 @@ export function buildEmbedUrl(
     widget.searchParams.set("color", "#ff2d8b");
     widget.searchParams.set("visual", "true");
     return widget.toString();
+  }
+
+  if (sourceType === "YOUTUBE") {
+    const url = parseHttpsUrl(normalizedUrl);
+    if (!url) return null;
+    const id = extractYoutubeId(url);
+    if (!id) return null;
+    return `https://www.youtube.com/embed/${id}`;
   }
 
   return null;

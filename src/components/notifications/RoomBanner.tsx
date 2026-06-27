@@ -24,12 +24,18 @@ function formatRemaining(ms: number) {
 }
 
 export function RoomBanner({ closesAt, className }: RoomBannerProps) {
+  // `mounted` gates anything derived from `Date.now()` so SSR HTML and the
+  // client's first paint match (otherwise the countdown text differs by ~1s
+  // and React rehydrates the whole banner).
+  const [mounted, setMounted] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   // Dismissal is keyed by state so a flip from open -> closed re-surfaces the
   // banner even after the open one was dismissed.
   const [dismissed, setDismissed] = useState<"open" | "closed" | null>(null);
 
   useEffect(() => {
+    setMounted(true);
+    setNow(Date.now());
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
   }, []);
@@ -40,9 +46,11 @@ export function RoomBanner({ closesAt, className }: RoomBannerProps) {
   if (Number.isNaN(target)) return null;
 
   const remaining = target - now;
-  const closed = remaining <= 0;
+  // Before mount we don't know the real remaining time, so assume "open" to
+  // keep the server-rendered tree stable. The real state lands on first tick.
+  const closed = mounted && remaining <= 0;
   const state: "open" | "closed" = closed ? "closed" : "open";
-  if (dismissed === state) return null;
+  if (mounted && dismissed === state) return null;
 
   return (
     <div
@@ -63,7 +71,7 @@ export function RoomBanner({ closesAt, className }: RoomBannerProps) {
           <>
             Voting is open — closes in{" "}
             <span className="font-mono tabular-nums">
-              {formatRemaining(remaining)}
+              {mounted ? formatRemaining(remaining) : "--:--"}
             </span>
           </>
         )}

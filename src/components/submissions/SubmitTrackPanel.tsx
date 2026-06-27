@@ -155,7 +155,7 @@ export function SubmitTrackPanel({
 
   async function submitEmbed() {
     if (!externalUrl.trim()) {
-      setError("Paste a Spotify or SoundCloud link.");
+      setError("Paste a Spotify, SoundCloud, or YouTube link.");
       return;
     }
     setError("");
@@ -251,7 +251,7 @@ export function SubmitTrackPanel({
           <p className="mt-5 text-sm leading-6 text-muted-foreground">
             {mySubmission
               ? "Submit again to replace your pending entry."
-              : "Upload an MP3/WAV or paste an official Spotify/SoundCloud link."}
+              : "Upload an MP3/WAV or paste an official Spotify, SoundCloud, or YouTube link."}
           </p>
 
           {recentSubmissions.length > 0 && (
@@ -349,14 +349,14 @@ export function SubmitTrackPanel({
                   htmlFor="external-url"
                   className="mb-2 block text-sm font-bold text-foreground"
                 >
-                  Spotify or SoundCloud link
+                  Spotify, SoundCloud, or YouTube link
                 </label>
                 <Input
                   id="external-url"
                   name="externalUrl"
                   type="url"
                   inputMode="url"
-                  placeholder="https://open.spotify.com/track/…"
+                  placeholder="https://open.spotify.com/track/… or https://youtu.be/…"
                   value={externalUrl}
                   onChange={(event) => setExternalUrl(event.target.value)}
                 />

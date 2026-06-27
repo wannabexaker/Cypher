@@ -79,6 +79,7 @@ enum SourceType {
   FILE_WAV
   SOUNDCLOUD
   SPOTIFY
+  YOUTUBE
   OTHER_URL
 }
 
