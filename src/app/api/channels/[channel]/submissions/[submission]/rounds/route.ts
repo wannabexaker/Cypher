@@ -1,7 +1,9 @@
+import { ContestMode } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { canManageChannel } from "@/lib/channels";
+import { bumpChannelActivity, getActiveContest } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 
@@ -101,6 +103,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     : null;
 
   const round = await prisma.$transaction(async (transaction) => {
+    // H16a: stamp the active LEADERBOARD contest on the round so reads
+    // can group rounds + their votes by contest.
+    const activeContest = await getActiveContest(
+      transaction,
+      channelId,
+      ContestMode.LEADERBOARD,
+    );
     const created = await transaction.trackVoteRound.create({
       data: {
         channelId,
@@ -110,6 +119,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         durationSeconds: parsed.data.durationSeconds ?? null,
         openedAt: now,
         closesAt,
+        contestId: activeContest?.id,
       },
     });
 
@@ -130,6 +140,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return created;
   });
+
+  await bumpChannelActivity(prisma, channelId);
 
   return NextResponse.json({
     id: round.id,

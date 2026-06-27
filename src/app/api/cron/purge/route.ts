@@ -5,10 +5,11 @@ import { deleteObject } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
-// H14: retention sweep. Vercel cron hits this daily with
-// `Authorization: Bearer <CRON_SECRET>`. Each overdue channel (purgeAfter <=
-// now) gets its MinIO objects wiped first, then the row cascade-deletes the
-// rest. No always-on worker — this is purely scheduled.
+// H14 + H16a: retention sweep. Vercel cron hits this daily with
+// `Authorization: Bearer <CRON_SECRET>`. Channels with no activity for 15+
+// days (lastActivityAt < now - 15d) get their MinIO objects wiped first,
+// then the row cascade-deletes the rest. No always-on worker — purely
+// scheduled.
 function authorized(request: Request): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
@@ -24,8 +25,11 @@ export async function GET(request: Request) {
   }
 
   const now = new Date();
+  // H16a: 15-day inactivity rule replaces the old purge_after stamp. Channels
+  // are "alive" until no submission / vote / round activity for 15 days.
+  const cutoff = new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000);
   const due = await prisma.channel.findMany({
-    where: { purgeAfter: { lte: now } },
+    where: { lastActivityAt: { lt: cutoff } },
     select: { id: true, code: true, name: true },
     take: 50, // cap per run; daily cadence + 50/run is plenty for now
   });

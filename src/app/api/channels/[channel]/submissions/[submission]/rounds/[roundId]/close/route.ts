@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 import { canManageChannel } from "@/lib/channels";
+import { bumpChannelActivity } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 
@@ -96,6 +97,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     return result;
   });
+
+  await bumpChannelActivity(prisma, channelId);
 
   return NextResponse.json({
     id: updated.id,

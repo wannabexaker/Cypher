@@ -1,5 +1,7 @@
 import {
   ChannelStatus,
+  ContestMode,
+  ContestStatus,
   MatchupStatus,
   Prisma,
   ResultsVisibility,
@@ -146,11 +148,25 @@ export async function POST(request: NextRequest, context: RouteContext) {
           throw new BattleAlreadyExistsError();
         }
 
+        // H16a: a battle bracket gets its own Contest so reads can group
+        // matchups + matchup votes by it. Created before the round so we can
+        // stamp `contestId` on the round inline.
+        const battleContest = await transaction.contest.create({
+          data: {
+            channelId: channel.id,
+            mode: ContestMode.BATTLE,
+            status: ContestStatus.VOTING_OPEN,
+            bracketSize: k,
+          },
+          select: { id: true },
+        });
+
         const round = await transaction.battleRound.create({
           data: {
             channelId: channel.id,
             roundNumber: 1,
             status: RoundStatus.VOTING_OPEN,
+            contestId: battleContest.id,
           },
           select: { id: true },
         });
@@ -169,12 +185,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
         await transaction.matchup.createMany({ data: pairs });
 
+        // Seed = bracket order (1..k) using the ranking we just computed.
+        await transaction.contestParticipant.createMany({
+          data: seeded.map((submission, index) => ({
+            contestId: battleContest.id,
+            submissionId: submission.id,
+            seed: index + 1,
+          })),
+        });
+
         await transaction.channel.update({
           where: { id: channel.id },
           data: {
             status: ChannelStatus.BATTLE,
             championSubmissionId: null,
             completedAt: null,
+            lastActivityAt: new Date(),
           },
         });
 
@@ -184,7 +210,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
             action: "battle.create",
             entityType: "channel",
             entityId: channel.id,
-            metadata: { k },
+            metadata: { k, contestId: battleContest.id },
           },
         });
 

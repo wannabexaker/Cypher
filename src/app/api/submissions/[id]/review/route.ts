@@ -1,7 +1,8 @@
-import { SubmissionStatus } from "@prisma/client";
+import { ContestMode, SubmissionStatus } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { canModerateChannel } from "@/lib/channels";
+import { bumpChannelActivity, getActiveContest } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { reviewSubmissionSchema } from "@/lib/validation/submissions";
@@ -88,6 +89,31 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       },
     });
 
+    if (approved) {
+      // H16a: an approval joins the submission to the active LEADERBOARD
+      // contest, when one exists, so it shows up in contest-shaped reads.
+      const activeContest = await getActiveContest(
+        transaction,
+        submission.channelId,
+        ContestMode.LEADERBOARD,
+      );
+      if (activeContest) {
+        await transaction.contestParticipant.upsert({
+          where: {
+            contestId_submissionId: {
+              contestId: activeContest.id,
+              submissionId: submission.id,
+            },
+          },
+          create: {
+            contestId: activeContest.id,
+            submissionId: submission.id,
+          },
+          update: {},
+        });
+      }
+    }
+
     await transaction.auditLog.create({
       data: {
         actorUserId: user.id,
@@ -101,6 +127,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       },
     });
   });
+
+  await bumpChannelActivity(prisma, submission.channelId);
 
   return NextResponse.json({ id: submission.id, status: nextStatus });
 }

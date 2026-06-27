@@ -1,7 +1,13 @@
-import { ChannelStatus, SubmissionStatus } from "@prisma/client";
+import {
+  ChannelStatus,
+  ContestMode,
+  ContestStatus,
+  SubmissionStatus,
+} from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { canManageChannel } from "@/lib/channels";
+import { getActiveContest } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { finalizeChannelSchema } from "@/lib/validation/finalize";
@@ -143,9 +149,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const now = new Date();
-  // H14: stamp the retention cutoff at finalize. Cron sweeps channels with
-  // purgeAfter <= now; the host can also delete sooner from the dashboard.
-  const purgeAfter = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
   const updated = await prisma.$transaction(async (transaction) => {
     // H13.1: persist each track's final counts so the results page mirrors the
     // ranking the crown used (otherwise MERGE-vs-SELECTED would diverge from
@@ -167,7 +170,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         completedAt: now,
         championSubmissionId,
         votingClosesAt: now,
-        purgeAfter,
+        lastActivityAt: now,
       },
       select: {
         status: true,
@@ -175,6 +178,38 @@ export async function POST(request: NextRequest, context: RouteContext) {
         completedAt: true,
       },
     });
+
+    // H16a: also mark the active LEADERBOARD contest COMPLETED + carry the
+    // champion. Mirrors the channel change so contest-shaped reads agree.
+    const leaderboardContest = await getActiveContest(
+      transaction,
+      channel.id,
+      ContestMode.LEADERBOARD,
+    );
+    if (leaderboardContest) {
+      await transaction.contest.update({
+        where: { id: leaderboardContest.id },
+        data: {
+          status: ContestStatus.COMPLETED,
+          championSubmissionId,
+          completedAt: now,
+        },
+      });
+      // Sync the participants' final W/L from the just-persisted submissions
+      // so the contest reads carry the same numbers as the channel reads.
+      for (const submission of scored) {
+        await transaction.contestParticipant.updateMany({
+          where: {
+            contestId: leaderboardContest.id,
+            submissionId: submission.id,
+          },
+          data: {
+            wins: submission.winCount,
+            losses: submission.lossCount,
+          },
+        });
+      }
+    }
 
     await transaction.auditLog.create({
       data: {

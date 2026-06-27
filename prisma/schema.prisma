@@ -119,6 +119,21 @@ enum MatchupStatus {
   DECIDED
 }
 
+// H16a: a Contest is a single competition that runs inside a Channel.
+// Channels are persistent venues; each Contest captures one round of activity
+// (a leaderboard or a battle bracket). Additive in H16a — existing flows still
+// keep working without resolving a contest.
+enum ContestMode {
+  BATTLE
+  LEADERBOARD
+}
+
+enum ContestStatus {
+  DRAFT
+  VOTING_OPEN
+  COMPLETED
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth (Auth.js / NextAuth Prisma adapter) + app user
 // ─────────────────────────────────────────────────────────────────────────────
@@ -220,7 +235,13 @@ model Channel {
 
   // H14 retention: auto-purge cutoff = completedAt + 3 days. Cron deletes
   // channel + MinIO objects once now() >= purgeAfter. Hosts may delete sooner.
+  // H16a: superseded by lastActivityAt-based retention (15-day inactivity).
+  // Column kept additive — cron no longer reads it.
   purgeAfter DateTime? @map("purge_after")
+
+  // H16a: bumped whenever something happens in the channel (submission,
+  // vote, round open/close, finalize). Cron purges channels idle for 15 days.
+  lastActivityAt DateTime @default(now()) @map("last_activity_at")
 
   resultsVisibility  ResultsVisibility @default(AFTER_CLOSE) @map("results_visibility")
   voteScope          VoteScope         @default(PER_SUBMISSION) @map("vote_scope")
@@ -239,11 +260,13 @@ model Channel {
   votes             Vote[]
   trackVoteRounds   TrackVoteRound[]  // H13
   battleRounds      BattleRound[]
+  contests          Contest[]          // H16a
   pushSubscriptions PushSubscription[]
 
   @@index([status])
   @@index([hostId])
   @@index([visibility, status])
+  @@index([lastActivityAt])
   @@map("channels")
 }
 
@@ -322,6 +345,7 @@ model Submission {
   matchupsAsA     Matchup[]         @relation("MatchupSubmissionA")
   matchupsAsB     Matchup[]         @relation("MatchupSubmissionB")
   matchupsWon     Matchup[]         @relation("MatchupWinner")
+  contestEntries  ContestParticipant[] // H16a
 
   @@index([channelId, status])
   @@map("submissions")
@@ -363,6 +387,7 @@ model Vote {
   roundId            String? @map("round_id")                // BattleRound for battle votes
   matchupId          String? @map("matchup_id")              // for battle matchup votes
   trackVoteRoundId   String? @map("track_vote_round_id")     // H13: for qualifying track votes
+  contestId          String? @map("contest_id")              // H16a: resolved active contest (nullable for legacy rows)
   voterUserId        String? @map("voter_user_id")
 
   ipHash          String  @map("ip_hash") // HMAC, rate cap only
@@ -380,6 +405,7 @@ model Vote {
   round          BattleRound?    @relation(fields: [roundId], references: [id])
   matchup        Matchup?        @relation(fields: [matchupId], references: [id])
   trackVoteRound TrackVoteRound? @relation(fields: [trackVoteRoundId], references: [id])
+  contest        Contest?        @relation(fields: [contestId], references: [id])
   voter          User?           @relation(fields: [voterUserId], references: [id])
 
   @@unique([dedupeKey]) // FINAL guard against double-voting (catches races)
@@ -387,6 +413,7 @@ model Vote {
   @@index([submissionId, isValid])
   @@index([ipHash, channelId])
   @@index([trackVoteRoundId])
+  @@index([contestId, isValid])
   @@map("votes")
 }
 
@@ -398,6 +425,7 @@ model TrackVoteRound {
   id              String      @id @default(uuid())
   channelId       String      @map("channel_id")
   submissionId    String      @map("submission_id")
+  contestId       String?     @map("contest_id")             // H16a: resolved leaderboard contest
   index           Int         @map("index")                    // 1..5
   status          RoundStatus @default(VOTING_OPEN) @map("status")
   advances        Boolean     @default(false) @map("advances") // host-selected round
@@ -408,10 +436,12 @@ model TrackVoteRound {
 
   channel    Channel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
   submission Submission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  contest    Contest?    @relation(fields: [contestId], references: [id])
   votes      Vote[]
 
   @@unique([submissionId, index])
   @@index([channelId, status])
+  @@index([contestId])
   @@map("track_vote_rounds")
 }
 
@@ -422,6 +452,7 @@ model TrackVoteRound {
 model BattleRound {
   id            String      @id @default(uuid())
   channelId     String      @map("channel_id")
+  contestId     String?     @map("contest_id")              // H16a: resolved battle contest
   roundNumber   Int         @map("round_number")
   name          String? // e.g. "Ημιτελικοί"
   status        RoundStatus @default(PENDING)
@@ -429,10 +460,12 @@ model BattleRound {
   votingEndAt   DateTime?   @map("voting_end_at")
 
   channel  Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  contest  Contest?  @relation(fields: [contestId], references: [id])
   matchups Matchup[]
   votes    Vote[]
 
   @@unique([channelId, roundNumber])
+  @@index([contestId])
   @@map("battle_rounds")
 }
 
@@ -455,6 +488,56 @@ model Matchup {
 
   @@index([roundId])
   @@map("matchups")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// H16a Contest: a single competition that runs inside a Channel.
+// A Channel is the persistent venue; each Contest is one round of activity
+// (LEADERBOARD = open submissions + votes; BATTLE = single-elim bracket).
+// Per-mode stats aggregate from ContestParticipant.wins/losses; live counters
+// on Submission still mirror the active contest in H16a.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Contest {
+  id                   String            @id @default(uuid())
+  channelId            String            @map("channel_id")
+  mode                 ContestMode
+  status               ContestStatus     @default(DRAFT)
+  bracketSize          Int?              @map("bracket_size")           // BATTLE only
+  title                String?
+  votingClosesAt       DateTime?         @map("voting_closes_at")
+  championSubmissionId String?           @map("champion_submission_id")
+  rankingSnapshot      Json?             @map("ranking_snapshot")
+  resultsVisibility    ResultsVisibility @default(AFTER_CLOSE) @map("results_visibility")
+  createdAt            DateTime          @default(now()) @map("created_at")
+  completedAt          DateTime?         @map("completed_at")
+
+  channel      Channel              @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  participants ContestParticipant[]
+  votes        Vote[]
+  trackVoteRounds TrackVoteRound[]
+  battleRounds BattleRound[]
+
+  @@index([channelId, mode, status])
+  @@map("contests")
+}
+
+model ContestParticipant {
+  id               String  @id @default(uuid())
+  contestId        String  @map("contest_id")
+  submissionId     String  @map("submission_id")
+  seed             Int?
+  wins             Int     @default(0)
+  losses           Int     @default(0)
+  rank             Int?
+  eliminatedRound  Int?    @map("eliminated_round")
+
+  contest    Contest    @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@unique([contestId, submissionId])
+  @@index([submissionId])
+  @@map("contest_participants")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

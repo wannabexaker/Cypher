@@ -1,5 +1,6 @@
 import {
   ChannelStatus,
+  ContestMode,
   SubmissionStatus,
   RoundStatus,
 } from "@prisma/client";
@@ -10,6 +11,7 @@ import {
   VoteIpCapError,
   VoteTurnstileError,
 } from "@/lib/cast-wl-vote";
+import { bumpChannelActivity, getActiveContest } from "@/lib/contests";
 import {
   findChannelMembership,
   resolveChannelIdentity,
@@ -130,6 +132,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return `ch:${channel.id}:s:${submission.id}:${identityKey}`;
     };
 
+    // H16a: resolve the active LEADERBOARD contest so this vote (and any
+    // participant tally update) is stamped with the right contestId.
+    const activeContest = await getActiveContest(
+      prisma,
+      channel.id,
+      ContestMode.LEADERBOARD,
+    );
+
     const result = await castWlVote({
       request,
       identity,
@@ -141,6 +151,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       turnstileToken: parsed.data.turnstileToken,
       dedupeKeyForIdentity,
       trackVoteRoundId: openRound?.id,
+      contestId: activeContest?.id,
       updateAfterVote: async (transaction, counts) => {
         await transaction.submission.update({
           where: { id: submission.id },
@@ -150,8 +161,26 @@ export async function POST(request: NextRequest, context: RouteContext) {
             voteCount: counts.total,
           },
         });
+        if (activeContest) {
+          // H16a: keep ContestParticipant counts in sync alongside the
+          // submission mirror so the new contest reads match the old reads.
+          await transaction.contestParticipant.updateMany({
+            where: {
+              contestId: activeContest.id,
+              submissionId: submission.id,
+            },
+            data: {
+              wins: counts.winCount,
+              losses: counts.lossCount,
+            },
+          });
+        }
       },
     });
+
+    if (result.created) {
+      await bumpChannelActivity(prisma, channel.id);
+    }
 
     return NextResponse.json(
       {

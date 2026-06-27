@@ -1,5 +1,6 @@
 import {
   ChannelStatus,
+  ContestStatus,
   MatchupStatus,
   Prisma,
   RoundStatus,
@@ -7,6 +8,7 @@ import {
 import { type NextRequest, NextResponse } from "next/server";
 
 import { canManageChannel } from "@/lib/channels";
+import { bumpChannelActivity } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { closeBattleRoundSchema } from "@/lib/validation/battle";
@@ -78,6 +80,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       channelId: true,
       roundNumber: true,
       status: true,
+      contestId: true,
       matchups: {
         orderBy: { position: "asc" },
         select: {
@@ -224,26 +227,34 @@ export async function POST(request: NextRequest, context: RouteContext) {
         if (winners.length === 1) {
           championSubmissionId = winners[0];
           completed = true;
-          // H14: room is COMPLETED → stamp the 3-day retention cutoff so the
-          // cron purge can sweep it. Hosts can still delete sooner.
-          const purgeAfter = new Date(
-            now.getTime() + 3 * 24 * 60 * 60 * 1000,
-          );
           await transaction.channel.update({
             where: { id: channel.id },
             data: {
               championSubmissionId,
               status: ChannelStatus.COMPLETED,
               completedAt: now,
-              purgeAfter,
+              lastActivityAt: now,
             },
           });
+          // H16a: the battle contest is over — mark it COMPLETED and stamp
+          // the champion so contest reads carry the final state.
+          if (round.contestId) {
+            await transaction.contest.update({
+              where: { id: round.contestId },
+              data: {
+                status: ContestStatus.COMPLETED,
+                completedAt: now,
+                championSubmissionId,
+              },
+            });
+          }
         } else {
           const next = await transaction.battleRound.create({
             data: {
               channelId: channel.id,
               roundNumber: round.roundNumber + 1,
               status: RoundStatus.VOTING_OPEN,
+              contestId: round.contestId,
             },
             select: { id: true },
           });
@@ -287,6 +298,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+
+    // H16a: closing a battle round (success or progression) means the room
+    // is alive — bump activity outside the transaction.
+    await bumpChannelActivity(prisma, channel.id);
 
     return NextResponse.json(result);
   } catch (error) {

@@ -1,5 +1,6 @@
 import {
   ChannelStatus,
+  ContestMode,
   MatchupStatus,
   RoundStatus,
 } from "@prisma/client";
@@ -10,6 +11,7 @@ import {
   VoteIpCapError,
   VoteTurnstileError,
 } from "@/lib/cast-wl-vote";
+import { bumpChannelActivity, getActiveContest } from "@/lib/contests";
 import {
   findChannelMembership,
   resolveChannelIdentity,
@@ -109,6 +111,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   try {
+    // H16a: stamp the active BATTLE contest on the vote when one exists.
+    const activeContest = await getActiveContest(
+      prisma,
+      channel.id,
+      ContestMode.BATTLE,
+    );
     const result = await castWlVote({
       request,
       identity,
@@ -120,10 +128,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
       choice: parsed.data.choice,
       fingerprint: parsed.data.fingerprint,
       turnstileToken: parsed.data.turnstileToken,
+      contestId: activeContest?.id,
       dedupeKeyForIdentity: (identityKey) =>
         `m:${matchup.id}:s:${parsed.data.submissionId}:${identityKey}`,
       tallyWhere: { matchupId: matchup.id },
     });
+
+    if (result.created) {
+      await bumpChannelActivity(prisma, channel.id);
+    }
 
     return NextResponse.json(
       {

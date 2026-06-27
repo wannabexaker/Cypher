@@ -8,6 +8,7 @@ import {
 import { type NextRequest, NextResponse } from "next/server";
 
 import { classifyEmbedUrl } from "@/lib/embeds";
+import { bumpChannelActivity } from "@/lib/contests";
 import {
   isAudioMimeType,
   MAGIC_BYTE_READ_LENGTH,
@@ -301,6 +302,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (staleStorageKey) {
     await deleteObject(staleStorageKey);
   }
+
+  // H16a: a new (or replaced) submission means the room is alive.
+  await bumpChannelActivity(prisma, channel.id);
 
   return NextResponse.json(
     { submissionId, status: SubmissionStatus.PENDING },

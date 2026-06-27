@@ -38,6 +38,7 @@ type CastWlVoteInput = {
   roundId?: string;
   matchupId?: string;
   trackVoteRoundId?: string; // H13: for track round voting
+  contestId?: string; // H16a: stamp the owning contest when one is active
   tallyWhere?: Prisma.VoteWhereInput;
   updateAfterVote?: (
     transaction: Prisma.TransactionClient,
@@ -112,6 +113,7 @@ export async function castWlVote(input: CastWlVoteInput): Promise<CastWlVoteResu
                 roundId: input.roundId,
                 matchupId: input.matchupId,
                 trackVoteRoundId: input.trackVoteRoundId,
+                contestId: input.contestId,
                 voterUserId: input.identity.user?.id ?? null,
                 ipHash,
                 fingerprintHash,
