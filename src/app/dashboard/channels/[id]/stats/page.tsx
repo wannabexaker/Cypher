@@ -10,6 +10,12 @@ import { buttonVariants } from "@/components/ui/button";
 import { getBattleState } from "@/lib/battles";
 import { canManageChannel } from "@/lib/channels";
 import { getLatestCompletedContest, parseRankingSnapshot } from "@/lib/contests";
+import {
+  AUDIT_PAGE_SIZE,
+  fetchChannelAuditPage,
+  parseAuditPageParam,
+  summarizeAuditMetadata,
+} from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { compareWinRatio, getVoteSplit } from "@/lib/votes";
@@ -24,25 +30,8 @@ type PageProps = {
   searchParams: Promise<{ audit?: string }>;
 };
 
-const AUDIT_PAGE_SIZE = 25;
-
-function asPage(value?: string) {
-  const parsed = Number.parseInt(value ?? "1", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
-
 function compactPercent(value: number) {
   return `${Math.max(0, Math.min(100, value))}%`;
-}
-
-function summarizeMetadata(metadata: unknown) {
-  if (!metadata || typeof metadata !== "object") return "-";
-  try {
-    const raw = JSON.stringify(metadata);
-    return raw.length > 140 ? `${raw.slice(0, 140)}...` : raw;
-  } catch {
-    return "-";
-  }
 }
 
 function formatHourBucket(date: Date) {
@@ -92,7 +81,7 @@ export default async function ChannelStatsPage({ params, searchParams }: PagePro
   const effectiveCompleted =
     channel.status === "COMPLETED" || Boolean(latestLeaderboardContest);
 
-  const auditPage = asPage(query.audit);
+  const auditPage = parseAuditPageParam(query.audit);
 
   const [
     roleGroups,
@@ -105,8 +94,7 @@ export default async function ChannelStatsPage({ params, searchParams }: PagePro
     champion,
     battleRoundCount,
     battleState,
-    auditTotal,
-    auditRows,
+    auditPageResult,
   ] = await Promise.all([
     prisma.channelMember.groupBy({
       by: ["role"],
@@ -166,35 +154,10 @@ export default async function ChannelStatsPage({ params, searchParams }: PagePro
       : Promise.resolve(null),
     prisma.battleRound.count({ where: { channelId: channel.id } }),
     getBattleState(channel.id).catch(() => null),
-    prisma.auditLog.count({
-      where: {
-        OR: [
-          { entityId: channel.id },
-          { metadata: { path: ["channelId"], equals: channel.id } },
-        ],
-      },
-    }),
-    prisma.auditLog.findMany({
-      where: {
-        OR: [
-          { entityId: channel.id },
-          { metadata: { path: ["channelId"], equals: channel.id } },
-        ],
-      },
-      include: {
-        actor: {
-          select: {
-            id: true,
-            username: true,
-            displayName: true,
-          },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-      skip: (auditPage - 1) * AUDIT_PAGE_SIZE,
-      take: AUDIT_PAGE_SIZE,
-    }),
+    fetchChannelAuditPage(channel.id, auditPage),
   ]);
+
+  const { entries: auditRows, total: auditTotal } = auditPageResult;
 
   const roleCounts = {
     HOST: roleGroups.find((entry) => entry.role === "HOST")?._count._all ?? 0,
@@ -575,7 +538,7 @@ export default async function ChannelStatsPage({ params, searchParams }: PagePro
                       {row.actor?.displayName ?? row.actor?.username ?? "system"}
                     </td>
                     <td className="px-3 py-2 font-mono text-[0.6875rem] text-muted-foreground break-all">
-                      {summarizeMetadata(row.metadata)}
+                      {summarizeAuditMetadata(row.metadata)}
                     </td>
                   </tr>
                 ))

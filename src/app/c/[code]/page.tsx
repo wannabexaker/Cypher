@@ -8,9 +8,10 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Crown, Gavel, ListMusic, Radio, Users } from "lucide-react";
+import { Crown, Gavel, ListMusic, Radio, ShieldAlert, ScrollText, Users } from "lucide-react";
 
 import { ChampionBanner } from "@/components/channels/ChampionBanner";
+import { ChannelDeleteControl } from "@/components/channels/ChannelDeleteControl";
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { JoinRoomPanel } from "@/components/channels/JoinRoomPanel";
@@ -26,6 +27,7 @@ import {
 } from "@/components/submissions/SubmissionStatusPill";
 import { SubmitTrackPanel } from "@/components/submissions/SubmitTrackPanel";
 import { TrackPlayer } from "@/components/submissions/TrackPlayer";
+import { DisqualifyTrackButton } from "@/components/submissions/DisqualifyTrackButton";
 import { buttonVariants } from "@/components/ui/button";
 import { VoteControl } from "@/components/voting/VoteControl";
 import { VotingCountdown } from "@/components/voting/VotingCountdown";
@@ -591,6 +593,16 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                             canSeeCounts ? undefined : countsHiddenLabel
                           }
                         />
+                        {isHostOrModerator && (
+                          <div className="mt-3 flex justify-end border-t border-border pt-3">
+                            <DisqualifyTrackButton
+                              channelId={channel.id}
+                              submissionId={submission.id}
+                              artistName={submission.artistName}
+                              trackTitle={submission.trackTitle}
+                            />
+                          </div>
+                        )}
                       </li>
                     );
                   })}
@@ -714,6 +726,45 @@ export default async function ChannelRoomPage({ params }: PageProps) {
           )}
         </aside>
       </div>
+
+      {isHostOrModerator && (
+        <section className="mx-auto mt-10 max-w-3xl rounded-xl border border-border bg-elevated p-6 shadow-panel">
+          <div className="flex items-center gap-2 font-mono text-xs font-bold tracking-[0.16em] text-cyan uppercase">
+            <ScrollText className="size-4" />
+            Mod tools
+          </div>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            Review every moderation action — submissions, contests, members,
+            channel changes — for this room.
+          </p>
+          <Link
+            href={`/c/${channel.code}/audit`}
+            className={`${buttonVariants({ variant: "outline", size: "sm" })} mt-4`}
+          >
+            <ScrollText />
+            Open audit log
+          </Link>
+        </section>
+      )}
+
+      {user && user.id === channel.hostId && (
+        <section className="mx-auto mt-6 max-w-3xl rounded-xl border border-magenta/40 bg-elevated p-6 shadow-panel">
+          <div className="flex items-center gap-2 font-mono text-xs font-bold tracking-[0.16em] text-magenta uppercase">
+            <ShieldAlert className="size-4" />
+            Danger zone
+          </div>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            Deleting this room removes its members, submissions, votes, and
+            uploaded media. This can&apos;t be undone.
+          </p>
+          <div className="mt-4">
+            <ChannelDeleteControl
+              channelId={channel.id}
+              channelName={channel.name}
+            />
+          </div>
+        </section>
+      )}
     </main>
   );
 }

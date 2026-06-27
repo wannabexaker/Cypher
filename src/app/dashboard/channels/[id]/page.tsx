@@ -31,6 +31,7 @@ import { ContestStartControl } from "@/components/channels/ContestStartControl";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { ManageChannelForm } from "@/components/channels/ManageChannelForm";
 import { MemberRoleControl } from "@/components/channels/MemberRoleControl";
+import { KickMemberButton } from "@/components/channels/KickMemberButton";
 import { PodiumTop3 } from "@/components/contests/PodiumTop3";
 import { ModerationQueue } from "@/components/submissions/ModerationQueue";
 import { buttonVariants } from "@/components/ui/button";
@@ -546,11 +547,18 @@ export default async function ManageChannelPage({ params }: PageProps) {
                           </span>
                         </div>
                         {member.role !== "HOST" && (
-                          <MemberRoleControl
-                            channelId={channel.id}
-                            memberId={member.id}
-                            role={member.role}
-                          />
+                          <div className="flex flex-wrap items-start gap-3 sm:items-center sm:justify-end">
+                            <MemberRoleControl
+                              channelId={channel.id}
+                              memberId={member.id}
+                              role={member.role}
+                            />
+                            <KickMemberButton
+                              channelId={channel.id}
+                              memberId={member.id}
+                              displayName={member.displayName}
+                            />
+                          </div>
                         )}
                       </li>
                     ))}

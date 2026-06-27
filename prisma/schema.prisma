@@ -87,6 +87,7 @@ enum SubmissionStatus {
   PENDING
   APPROVED
   REJECTED
+  DISQUALIFIED
 }
 
 enum ScanStatus {
