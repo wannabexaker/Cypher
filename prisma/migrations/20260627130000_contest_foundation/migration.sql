@@ -103,11 +103,13 @@ BEGIN
         ORDER BY "created_at" ASC
     LOOP
         -- Did this channel ever run a battle bracket? Drives champion attribution.
-        SELECT COUNT(*)::int / 2 INTO seed_count
+        -- Count round-1 matchups; each contributes 2 seeded submissions, so
+        -- bracketSize = matchups * 2. (Earlier `COUNT/2*2` was wrong: it halved
+        -- the bracket and dropped k=2 battles entirely — review-fix.)
+        SELECT COUNT(*)::int INTO seed_count
         FROM "matchups" m
         JOIN "battle_rounds" br ON br."id" = m."round_id"
         WHERE br."channel_id" = ch."id" AND br."round_number" = 1;
-        -- Each matchup contributes 2 seeded submissions; bracketSize = seeded count.
         seed_count := seed_count * 2;
 
         leaderboard_status := CASE WHEN ch."status" = 'COMPLETED' AND seed_count = 0
