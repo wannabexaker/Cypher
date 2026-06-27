@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { SubmissionStatus } from "@prisma/client";
+import { ContestMode, SubmissionStatus } from "@prisma/client";
 import {
   ArrowLeft,
   Flag,
@@ -11,6 +11,7 @@ import {
   ListChecks,
   Music2,
   Radio,
+  Sparkles,
   Swords,
   Timer,
   Trash2,
@@ -26,12 +27,17 @@ import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { ChannelStatusControl } from "@/components/channels/ChannelStatusControl";
 import { ChannelTimerControl } from "@/components/channels/ChannelTimerControl";
 import { ChannelTransferControl } from "@/components/channels/ChannelTransferControl";
+import { ContestStartControl } from "@/components/channels/ContestStartControl";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { ManageChannelForm } from "@/components/channels/ManageChannelForm";
 import { MemberRoleControl } from "@/components/channels/MemberRoleControl";
 import { ModerationQueue } from "@/components/submissions/ModerationQueue";
 import { buttonVariants } from "@/components/ui/button";
 import { canManageChannel } from "@/lib/channels";
+import {
+  getActiveContest,
+  getLatestCompletedContest,
+} from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { compareWinRatio, getVoteSplit } from "@/lib/votes";
@@ -142,6 +148,24 @@ export default async function ManageChannelPage({ params }: PageProps) {
         })
       : null;
 
+  // H16b: contest lifecycle. Active contest gates the host controls; the
+  // latest COMPLETED LEADERBOARD contest is the source of truth for the
+  // champion banner now that channels stay OPEN as venues.
+  const [activeLeaderboardContest, activeBattleContest, latestLeaderboardContest] =
+    await Promise.all([
+      getActiveContest(prisma, channel.id, ContestMode.LEADERBOARD),
+      getActiveContest(prisma, channel.id, ContestMode.BATTLE),
+      getLatestCompletedContest(prisma, channel.id, ContestMode.LEADERBOARD),
+    ]);
+  const hasActiveContest = Boolean(
+    activeLeaderboardContest || activeBattleContest,
+  );
+  const effectiveChampionId =
+    latestLeaderboardContest?.championSubmissionId ??
+    channel.championSubmissionId ??
+    null;
+  const contestCompleted = Boolean(latestLeaderboardContest);
+
   const approvedCount = approvedTracks.length;
 
   // Rank approved tracks by W% so the host tie-picker mirrors the finalize
@@ -162,9 +186,9 @@ export default async function ManageChannelPage({ params }: PageProps) {
       };
     });
 
-  const championLabel = channel.championSubmissionId
+  const championLabel = effectiveChampionId
     ? (rankedApprovedTracks.find(
-        (track) => track.id === channel.championSubmissionId,
+        (track) => track.id === effectiveChampionId,
       )?.label ?? null)
     : null;
 
@@ -310,15 +334,37 @@ export default async function ManageChannelPage({ params }: PageProps) {
 
           <section className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-7">
             <div className="flex items-center gap-3">
+              <Sparkles className="size-5 text-primary-glow" />
+              <h2 className="text-2xl font-bold text-foreground">
+                Start contest
+              </h2>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Open a leaderboard contest so the room can vote. Each contest is
+              an independent rally — voting re-opens for everyone when you
+              start a fresh one. Battle brackets stay in their own panel.
+            </p>
+            <div className="mt-6">
+              <ContestStartControl
+                channelId={channel.id}
+                status={channel.status}
+                approvedCount={approvedCount}
+                hasActiveContest={hasActiveContest}
+              />
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-7">
+            <div className="flex items-center gap-3">
               <Crown className="size-5 text-lime" />
               <h2 className="text-2xl font-bold text-foreground">
                 Crown winner
               </h2>
             </div>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Finalize the room to rank approved tracks by W% and crown a
-              champion. On a tie at the top you pick the winner. This locks
-              voting and freezes results.
+              Finalize the active leaderboard contest to rank approved tracks
+              by W% and crown a champion. On a tie at the top you pick the
+              winner. The room stays open — start another contest anytime.
             </p>
             <div className="mt-6">
               <ChannelFinalizeControl
@@ -326,6 +372,8 @@ export default async function ManageChannelPage({ params }: PageProps) {
                 status={channel.status}
                 tracks={rankedApprovedTracks}
                 championLabel={championLabel}
+                activeContestId={activeLeaderboardContest?.id ?? null}
+                contestCompleted={contestCompleted}
               />
             </div>
           </section>

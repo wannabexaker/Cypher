@@ -1,11 +1,13 @@
 import {
   ChannelStatus,
+  ContestMode,
   ResultsVisibility,
   SubmissionStatus,
 } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { canManageChannel } from "@/lib/channels";
+import { getLatestCompletedContest } from "@/lib/contests";
 import {
   findChannelMembership,
   resolveChannelIdentity,
@@ -84,6 +86,20 @@ export async function GET(request: NextRequest, context: RouteContext) {
     channel.votingClosesAt && Date.now() >= channel.votingClosesAt.getTime(),
   );
 
+  // H16b: the latest COMPLETED LEADERBOARD contest now carries the canonical
+  // champion/completedAt for the room. Fall back to legacy channel fields so
+  // pre-H16b data still renders.
+  const latestContest = await getLatestCompletedContest(
+    prisma,
+    channel.id,
+    ContestMode.LEADERBOARD,
+  );
+  const championSubmissionId =
+    latestContest?.championSubmissionId ?? channel.championSubmissionId ?? null;
+  const completedAt = latestContest?.completedAt ?? channel.completedAt ?? null;
+  const contestCompleted = Boolean(latestContest);
+  const effectiveCompleted = completed || contestCompleted;
+
   // The host, a platform ADMIN, and channel MODERATORs run the room, so they
   // always see live counts regardless of the visibility setting.
   const callerIsHostOrModerator =
@@ -97,8 +113,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const canSeeCounts =
     channel.resultsVisibility === ResultsVisibility.LIVE ||
     (channel.resultsVisibility === ResultsVisibility.AFTER_CLOSE &&
-      (votingClosed || completed)) ||
-    (channel.resultsVisibility === ResultsVisibility.HIDDEN && completed) ||
+      (votingClosed || effectiveCompleted)) ||
+    (channel.resultsVisibility === ResultsVisibility.HIDDEN && effectiveCompleted) ||
     callerIsHostOrModerator;
 
   const ranked = channel.submissions
@@ -129,9 +145,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   const base = {
     status: channel.status,
-    completed,
-    completedAt: channel.completedAt,
-    championSubmissionId: channel.championSubmissionId,
+    completed: effectiveCompleted,
+    completedAt,
+    championSubmissionId,
     votingClosesAt: channel.votingClosesAt,
     votingClosed,
     choices,

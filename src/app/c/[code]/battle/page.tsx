@@ -1,4 +1,4 @@
-import { ChannelStatus, ResultsVisibility } from "@prisma/client";
+import { ChannelStatus, ContestMode, ResultsVisibility } from "@prisma/client";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Link from "next/link";
@@ -12,6 +12,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { VoteControl } from "@/components/voting/VoteControl";
 import { getBattleState } from "@/lib/battles";
 import { canManageChannel } from "@/lib/channels";
+import { getLatestCompletedContest } from "@/lib/contests";
 import { GUEST_COOKIE_NAME, readGuestToken } from "@/lib/guest-session";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
@@ -53,9 +54,19 @@ export default async function BattleBracketPage({ params }: PageProps) {
   });
   if (!channel) notFound();
 
+  // H16b: with channel-as-venue, a finished bracket flips the room back to
+  // OPEN. We still want this page to render historical brackets, so look for
+  // a latest COMPLETED BATTLE contest as a secondary signal.
+  const latestBattleContest = await getLatestCompletedContest(
+    prisma,
+    channel.id,
+    ContestMode.BATTLE,
+  );
+
   if (
     channel.status !== ChannelStatus.BATTLE &&
-    channel.status !== ChannelStatus.COMPLETED
+    channel.status !== ChannelStatus.COMPLETED &&
+    !latestBattleContest
   ) {
     redirect(`/c/${channel.code}`);
   }
@@ -83,6 +94,15 @@ export default async function BattleBracketPage({ params }: PageProps) {
       : null;
 
   const completed = channel.status === ChannelStatus.COMPLETED;
+  // H16b: completed-bracket reads pull from the latest COMPLETED BATTLE
+  // contest with the legacy channel fields as a fallback for pre-H16b rooms.
+  const effectiveChampionId =
+    latestBattleContest?.championSubmissionId ??
+    channel.championSubmissionId ??
+    null;
+  const effectiveCompletedAt =
+    latestBattleContest?.completedAt ?? channel.completedAt ?? null;
+  const battleCompleted = completed || Boolean(latestBattleContest);
   const callerIsHostOrModerator =
     membership?.role === "HOST" ||
     membership?.role === "MODERATOR" ||
@@ -90,8 +110,9 @@ export default async function BattleBracketPage({ params }: PageProps) {
 
   const canSeeCounts =
     channel.resultsVisibility === ResultsVisibility.LIVE ||
-    (channel.resultsVisibility === ResultsVisibility.AFTER_CLOSE && completed) ||
-    (channel.resultsVisibility === ResultsVisibility.HIDDEN && completed) ||
+    (channel.resultsVisibility === ResultsVisibility.AFTER_CLOSE &&
+      battleCompleted) ||
+    (channel.resultsVisibility === ResultsVisibility.HIDDEN && battleCompleted) ||
     callerIsHostOrModerator;
 
   const battle = await getBattleState(
@@ -105,9 +126,9 @@ export default async function BattleBracketPage({ params }: PageProps) {
       : undefined,
   );
 
-  const champion = channel.championSubmissionId
+  const champion = effectiveChampionId
     ? await prisma.submission.findUnique({
-        where: { id: channel.championSubmissionId },
+        where: { id: effectiveChampionId },
         select: {
           artistName: true,
           trackTitle: true,
@@ -160,14 +181,14 @@ export default async function BattleBracketPage({ params }: PageProps) {
         </p>
       </section>
 
-      {channel.status === ChannelStatus.COMPLETED && champion && championSplit && (
+      {battleCompleted && champion && championSplit && (
         <div className="section-shell pb-6">
           <ChampionBanner
             artistName={champion.artistName}
             trackTitle={champion.trackTitle}
             winPct={championSplit.winPct}
             total={championSplit.total}
-            completedAt={channel.completedAt}
+            completedAt={effectiveCompletedAt}
           />
         </div>
       )}

@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { SubmissionStatus } from "@prisma/client";
+import { ContestMode, SubmissionStatus } from "@prisma/client";
 import { ArrowLeft, Crown, ShieldCheck } from "lucide-react";
 
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { buttonVariants } from "@/components/ui/button";
 import { getBattleState } from "@/lib/battles";
 import { canManageChannel } from "@/lib/channels";
+import { getLatestCompletedContest } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { compareWinRatio, getVoteSplit } from "@/lib/votes";
@@ -72,6 +73,23 @@ export default async function ChannelStatsPage({ params, searchParams }: PagePro
   });
 
   if (!channel || !canManageChannel(user, channel)) notFound();
+
+  // H16b: champion + completion now live on the latest COMPLETED LEADERBOARD
+  // contest. Channels stay OPEN as venues; fall back to the legacy channel
+  // fields so pre-H16b rooms still render.
+  const latestLeaderboardContest = await getLatestCompletedContest(
+    prisma,
+    channel.id,
+    ContestMode.LEADERBOARD,
+  );
+  const effectiveChampionId =
+    latestLeaderboardContest?.championSubmissionId ??
+    channel.championSubmissionId ??
+    null;
+  const effectiveCompletedAt =
+    latestLeaderboardContest?.completedAt ?? channel.completedAt ?? null;
+  const effectiveCompleted =
+    channel.status === "COMPLETED" || Boolean(latestLeaderboardContest);
 
   const auditPage = asPage(query.audit);
 
@@ -139,9 +157,9 @@ export default async function ChannelStatsPage({ params, searchParams }: PagePro
       },
       _count: { _all: true },
     }),
-    channel.championSubmissionId
+    channel.championSubmissionId || effectiveChampionId
       ? prisma.submission.findUnique({
-          where: { id: channel.championSubmissionId },
+          where: { id: effectiveChampionId ?? channel.championSubmissionId! },
           select: { id: true, artistName: true, trackTitle: true },
         })
       : Promise.resolve(null),
@@ -401,7 +419,7 @@ export default async function ChannelStatsPage({ params, searchParams }: PagePro
       <section className="mt-6 grid gap-6 xl:grid-cols-2">
         <article className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-6">
           <h2 className="text-xl font-bold text-foreground">Results</h2>
-          {channel.status === "COMPLETED" && champion ? (
+          {effectiveCompleted && champion ? (
             <div className="mt-4 rounded-lg border border-lime/30 bg-lime/10 p-4">
               <p className="inline-flex items-center gap-2 font-mono text-[0.6875rem] font-bold tracking-[0.12em] text-lime uppercase">
                 <Crown className="size-3.5" />
@@ -410,15 +428,15 @@ export default async function ChannelStatsPage({ params, searchParams }: PagePro
               <p className="mt-2 text-lg font-bold text-foreground">
                 {champion.artistName} - {champion.trackTitle}
               </p>
-              {channel.completedAt && (
+              {effectiveCompletedAt && (
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Completed {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(channel.completedAt)}
+                  Completed {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(effectiveCompletedAt)}
                 </p>
               )}
             </div>
           ) : (
             <p className="mt-4 text-sm text-muted-foreground">
-              Champion and completion timestamp will appear once the room is completed.
+              Champion and completion timestamp will appear once a contest is finalized.
             </p>
           )}
         </article>

@@ -1,8 +1,20 @@
-import { ContestMode, ContestStatus, type Prisma, type PrismaClient } from "@prisma/client";
+import {
+  ContestMode,
+  ContestStatus,
+  type Prisma,
+  type PrismaClient,
+  SubmissionStatus,
+} from "@prisma/client";
 
-// H16a helpers — Channel-as-venue / Contest-as-event groundwork.
-// Both helpers are deliberately small and side-effect free beyond the writes
-// they describe, so call sites can fold them into existing transactions.
+import {
+  compareWinRatio,
+  computeSubmissionFinalCounts,
+  hasSameWinRatio,
+} from "@/lib/votes";
+
+// H16a/H16b helpers — Channel-as-venue / Contest-as-event groundwork.
+// Helpers are deliberately small and side-effect free beyond the writes they
+// describe, so call sites can fold them into existing transactions.
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -33,4 +45,227 @@ export async function getActiveContest(
     orderBy: { createdAt: "desc" },
   });
   return contest;
+}
+
+// H16b: return the most recently completed contest for a channel, optionally
+// filtered by mode. Reads consume this to render the venue's "current champion"
+// banner once the active contest closes — without any state living on Channel
+// anymore. Returns null when the channel has never run a contest of that mode.
+export type LatestCompletedContest = {
+  id: string;
+  mode: ContestMode;
+  championSubmissionId: string | null;
+  completedAt: Date | null;
+  rankingSnapshot: Prisma.JsonValue | null;
+};
+
+export async function getLatestCompletedContest(
+  db: Db,
+  channelId: string,
+  mode?: ContestMode,
+): Promise<LatestCompletedContest | null> {
+  return db.contest.findFirst({
+    where: {
+      channelId,
+      status: ContestStatus.COMPLETED,
+      ...(mode ? { mode } : {}),
+    },
+    select: {
+      id: true,
+      mode: true,
+      championSubmissionId: true,
+      completedAt: true,
+      rankingSnapshot: true,
+    },
+    orderBy: { completedAt: "desc" },
+  });
+}
+
+// H16b: a single active-contest gate any vote/round-create can call so it
+// returns the same 409 shape everywhere. Returns the contest when present.
+export async function requireActiveContest(
+  db: Db,
+  channelId: string,
+  mode: ContestMode,
+): Promise<{ id: string; status: ContestStatus } | null> {
+  return getActiveContest(db, channelId, mode);
+}
+
+// H16b: shared LEADERBOARD finalize logic. Used by both the new contest
+// finalize endpoint and the legacy channel finalize wrapper so the ranking
+// rules + tie-break shape stay in lockstep.
+export type LeaderboardFinalizeResult =
+  | {
+      kind: "ok";
+      contestId: string;
+      championSubmissionId: string;
+      completedAt: Date;
+      rankingSnapshot: RankingSnapshotEntry[];
+    }
+  | { kind: "tie"; tiedSubmissionIds: string[] }
+  | { kind: "no_approved" };
+
+export type RankingSnapshotEntry = {
+  submissionId: string;
+  rank: number;
+  wins: number;
+  losses: number;
+  winPct: number;
+};
+
+export type RunLeaderboardFinalizeInput = {
+  contestId: string;
+  channelId: string;
+  actorUserId: string;
+  championPick?: string;
+};
+
+export async function runLeaderboardFinalize(
+  prisma: PrismaClient,
+  input: RunLeaderboardFinalizeInput,
+): Promise<LeaderboardFinalizeResult> {
+  const submissions = await prisma.submission.findMany({
+    where: { channelId: input.channelId, status: SubmissionStatus.APPROVED },
+    select: {
+      id: true,
+      createdAt: true,
+      roundResultMode: true,
+      trackVoteRounds: {
+        select: { id: true, advances: true },
+      },
+    },
+  });
+
+  if (submissions.length === 0) {
+    return { kind: "no_approved" };
+  }
+
+  // Score each track using the same SELECTED/MERGE rules as the legacy crown
+  // path, but scoped to this contest so older votes don't bleed in.
+  const scored = await Promise.all(
+    submissions.map(async (submission) => {
+      const counts = await computeSubmissionFinalCounts(
+        prisma,
+        submission.id,
+        submission.roundResultMode,
+        submission.trackVoteRounds,
+        { contestId: input.contestId },
+      );
+      return {
+        id: submission.id,
+        createdAt: submission.createdAt,
+        winCount: counts.winCount,
+        lossCount: counts.lossCount,
+      };
+    }),
+  );
+
+  const ranked = [...scored].sort((a, b) => {
+    const ratioOrder = compareWinRatio(b, a);
+    if (ratioOrder !== 0) return ratioOrder;
+    const totalA = a.winCount + a.lossCount;
+    const totalB = b.winCount + b.lossCount;
+    if (totalB !== totalA) return totalB - totalA;
+    return a.createdAt.getTime() - b.createdAt.getTime();
+  });
+
+  const topTier = ranked.filter((submission) =>
+    hasSameWinRatio(submission, ranked[0]),
+  );
+
+  let championSubmissionId: string;
+  let tieBroken = false;
+
+  if (topTier.length > 1) {
+    const tiedSubmissionIds = topTier.map((submission) => submission.id);
+    const pick = input.championPick;
+    if (!pick || !tiedSubmissionIds.includes(pick)) {
+      return { kind: "tie", tiedSubmissionIds };
+    }
+    championSubmissionId = pick;
+    tieBroken = true;
+  } else {
+    championSubmissionId = ranked[0].id;
+  }
+
+  const rankingSnapshot: RankingSnapshotEntry[] = ranked.map(
+    (submission, index) => {
+      const total = submission.winCount + submission.lossCount;
+      const winPct = total === 0 ? 0 : submission.winCount / total;
+      return {
+        submissionId: submission.id,
+        rank: index + 1,
+        wins: submission.winCount,
+        losses: submission.lossCount,
+        winPct,
+      };
+    },
+  );
+
+  const now = new Date();
+  await prisma.$transaction(async (transaction) => {
+    // Mirror the contest counts onto the Submission row so live UI doesn't
+    // jump after finalize. ContestParticipant remains the contest-of-record.
+    for (const submission of scored) {
+      await transaction.submission.update({
+        where: { id: submission.id },
+        data: {
+          winCount: submission.winCount,
+          lossCount: submission.lossCount,
+        },
+      });
+    }
+
+    await transaction.contest.update({
+      where: { id: input.contestId },
+      data: {
+        status: ContestStatus.COMPLETED,
+        championSubmissionId,
+        completedAt: now,
+        rankingSnapshot: rankingSnapshot as unknown as Prisma.InputJsonValue,
+      },
+    });
+
+    for (const entry of rankingSnapshot) {
+      await transaction.contestParticipant.updateMany({
+        where: {
+          contestId: input.contestId,
+          submissionId: entry.submissionId,
+        },
+        data: {
+          rank: entry.rank,
+          wins: entry.wins,
+          losses: entry.losses,
+        },
+      });
+    }
+
+    await transaction.channel.update({
+      where: { id: input.channelId },
+      data: { lastActivityAt: now },
+    });
+
+    await transaction.auditLog.create({
+      data: {
+        actorUserId: input.actorUserId,
+        action: "contest.finalize",
+        entityType: "contest",
+        entityId: input.contestId,
+        metadata: {
+          channelId: input.channelId,
+          championSubmissionId,
+          tieBroken,
+          participants: rankingSnapshot.length,
+        },
+      },
+    });
+  });
+
+  return {
+    kind: "ok",
+    contestId: input.contestId,
+    championSubmissionId,
+    completedAt: now,
+    rankingSnapshot,
+  };
 }

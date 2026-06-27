@@ -1,8 +1,8 @@
-import { ChannelStatus, ContestMode } from "@prisma/client";
+import { ContestMode, ContestStatus } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { canManageChannel } from "@/lib/channels";
-import { getActiveContest, runLeaderboardFinalize } from "@/lib/contests";
+import { canModerateChannel } from "@/lib/channels";
+import { runLeaderboardFinalize } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { finalizeChannelSchema } from "@/lib/validation/finalize";
@@ -10,79 +10,80 @@ import { finalizeChannelSchema } from "@/lib/validation/finalize";
 export const runtime = "nodejs";
 
 type RouteContext = {
-  params: Promise<{ channel: string }>;
+  params: Promise<{ channel: string; id: string }>;
 };
 
-// H16b: legacy "finalize the room" endpoint is now a thin back-compat wrapper
-// around the active LEADERBOARD contest's finalize. The channel itself stays
-// OPEN as a venue — only the contest closes. UI that issues this call still
-// gets the same tie-break shape.
+// H16b: explicit contest-level finalize. LEADERBOARD only — BATTLE contests
+// auto-finalize when the final round closes. Same tie-break shape as the
+// legacy /channels/[channel]/finalize endpoint so the UI can be repointed
+// without a contract change.
 export async function POST(request: NextRequest, context: RouteContext) {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json(
-      { error: "Sign in to finalize this room." },
+      { error: "Sign in to finalize this contest." },
       { status: 401 },
     );
   }
 
-  const { channel: channelId } = await context.params;
+  const { channel: channelId, id: contestId } = await context.params;
 
   let body: unknown = {};
   try {
     const text = await request.text();
     body = text ? JSON.parse(text) : {};
   } catch {
-    return NextResponse.json({ error: "Invalid finalize request." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid finalize request." },
+      { status: 400 },
+    );
   }
 
   const parsed = finalizeChannelSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid finalize request." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid finalize request." },
+      { status: 400 },
+    );
   }
 
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
-    select: { id: true, hostId: true, status: true },
+    select: { id: true, hostId: true },
   });
-
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
   }
 
-  // Legacy behaviour stays host/ADMIN; the new /contests/[id]/finalize widens
-  // to include channel MODERATORs.
-  if (!canManageChannel(user, channel)) {
+  if (!(await canModerateChannel(user, channel))) {
     return NextResponse.json(
-      { error: "Only the host can finalize this room." },
+      { error: "Only hosts or moderators can finalize a contest." },
       { status: 403 },
     );
   }
 
-  if (channel.status !== ChannelStatus.OPEN) {
+  const contest = await prisma.contest.findUnique({
+    where: { id: contestId },
+    select: { id: true, channelId: true, mode: true, status: true },
+  });
+  if (!contest || contest.channelId !== channel.id) {
+    return NextResponse.json({ error: "Contest not found." }, { status: 404 });
+  }
+  if (contest.mode !== ContestMode.LEADERBOARD) {
     return NextResponse.json(
-      { error: "Only an open room can be finalized." },
+      { error: "Only LEADERBOARD contests can be finalized here." },
       { status: 409 },
     );
   }
-
-  const activeContest = await getActiveContest(
-    prisma,
-    channel.id,
-    ContestMode.LEADERBOARD,
-  );
-  if (!activeContest) {
+  if (contest.status !== ContestStatus.VOTING_OPEN) {
     return NextResponse.json(
-      {
-        error:
-          "No active leaderboard contest. Start a contest before finalizing.",
-      },
+      { error: "This contest is not open for finalization." },
       { status: 409 },
     );
   }
 
   const result = await runLeaderboardFinalize(prisma, {
-    contestId: activeContest.id,
+    contestId: contest.id,
     channelId: channel.id,
     actorUserId: user.id,
     championPick: parsed.data.championSubmissionId,
@@ -104,12 +105,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  // Channel-as-venue: room stays OPEN. The legacy response shape keeps the
-  // same field names so existing callers don't break.
   return NextResponse.json({
-    status: ChannelStatus.OPEN,
+    contestId: result.contestId,
+    status: ContestStatus.COMPLETED,
     championSubmissionId: result.championSubmissionId,
     completedAt: result.completedAt,
-    contestId: result.contestId,
+    rankingSnapshot: result.rankingSnapshot,
   });
 }

@@ -111,12 +111,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   try {
-    // H16a: stamp the active BATTLE contest on the vote when one exists.
+    // H16a/H16b: every matchup vote belongs to an active BATTLE contest.
+    // 409 if none — the room is in BATTLE mode but no contest is running
+    // (shouldn't happen via the new flow, but keeps the gate symmetric with
+    // leaderboard voting and surfaces broken state instead of swallowing it).
     const activeContest = await getActiveContest(
       prisma,
       channel.id,
       ContestMode.BATTLE,
     );
+    if (!activeContest) {
+      return NextResponse.json(
+        { error: "No active battle contest." },
+        { status: 409 },
+      );
+    }
     const result = await castWlVote({
       request,
       identity,
@@ -128,7 +137,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       choice: parsed.data.choice,
       fingerprint: parsed.data.fingerprint,
       turnstileToken: parsed.data.turnstileToken,
-      contestId: activeContest?.id,
+      contestId: activeContest.id,
       dedupeKeyForIdentity: (identityKey) =>
         `m:${matchup.id}:s:${parsed.data.submissionId}:${identityKey}`,
       tallyWhere: { matchupId: matchup.id },

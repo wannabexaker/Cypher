@@ -50,22 +50,39 @@ export type SubmissionRoundInfo = {
   advances: boolean;
 };
 
+export type ComputeSubmissionFinalCountsOptions = {
+  // H16b: scope the tally to a specific contest. When omitted, all votes for
+  // the submission count (legacy behaviour for the now-deprecated channel
+  // finalize path).
+  contestId?: string;
+};
+
 export async function computeSubmissionFinalCounts(
   client: VotesClient,
   submissionId: string,
   roundResultMode: ResultMode,
   rounds: SubmissionRoundInfo[],
+  options?: ComputeSubmissionFinalCountsOptions,
 ): Promise<VoteCounts> {
+  const base: Prisma.VoteWhereInput = options?.contestId
+    ? { contestId: options.contestId }
+    : {};
+
   // Legacy: no track rounds at all → count the channel-wide votes
   // (trackVoteRoundId = null) so older approved submissions still rank.
   if (rounds.length === 0) {
-    return aggregateChoice(client, { submissionId, trackVoteRoundId: null });
+    return aggregateChoice(client, {
+      ...base,
+      submissionId,
+      trackVoteRoundId: null,
+    });
   }
 
   if (roundResultMode === "SELECTED") {
     const chosen = rounds.find((round) => round.advances);
     if (chosen) {
       return aggregateChoice(client, {
+        ...base,
         submissionId,
         trackVoteRoundId: chosen.id,
       });
@@ -74,6 +91,7 @@ export async function computeSubmissionFinalCounts(
   }
 
   return aggregateChoice(client, {
+    ...base,
     submissionId,
     trackVoteRoundId: { in: rounds.map((round) => round.id) },
   });

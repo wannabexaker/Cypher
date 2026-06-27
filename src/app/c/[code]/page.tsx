@@ -1,5 +1,6 @@
 import {
   ChannelStatus,
+  ContestMode,
   ResultsVisibility,
   SubmissionStatus,
 } from "@prisma/client";
@@ -32,6 +33,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { canManageChannel } from "@/lib/channels";
+import { getLatestCompletedContest } from "@/lib/contests";
 import { channelCodeSchema } from "@/lib/validation/channels";
 import { compareWinRatio, getVoteSplit } from "@/lib/votes";
 
@@ -190,6 +192,20 @@ export default async function ChannelRoomPage({ params }: PageProps) {
 
   const isOpen = channel.status === ChannelStatus.OPEN;
   const completed = channel.status === ChannelStatus.COMPLETED;
+  // H16b: completed-room reads (champion banner, leaderboard freeze) now
+  // pull from the latest COMPLETED LEADERBOARD contest with the legacy
+  // channel fields as a fallback for pre-H16b rooms.
+  const latestContest = await getLatestCompletedContest(
+    prisma,
+    channel.id,
+    ContestMode.LEADERBOARD,
+  );
+  const effectiveChampionId =
+    latestContest?.championSubmissionId ?? channel.championSubmissionId ?? null;
+  const effectiveCompletedAt =
+    latestContest?.completedAt ?? channel.completedAt ?? null;
+  const contestCompleted = Boolean(latestContest);
+  const effectiveCompleted = completed || contestCompleted;
   const votingClosed = Boolean(
     channel.votingClosesAt &&
       channel.votingClosesAt.getTime() <= Date.now(),
@@ -210,8 +226,8 @@ export default async function ChannelRoomPage({ params }: PageProps) {
   const canSeeCounts =
     channel.resultsVisibility === ResultsVisibility.LIVE ||
     (channel.resultsVisibility === ResultsVisibility.AFTER_CLOSE &&
-      (votingClosed || completed)) ||
-    (channel.resultsVisibility === ResultsVisibility.HIDDEN && completed) ||
+      (votingClosed || effectiveCompleted)) ||
+    (channel.resultsVisibility === ResultsVisibility.HIDDEN && effectiveCompleted) ||
     isHostOrModerator;
   const countsHiddenLabel =
     channel.resultsVisibility === ResultsVisibility.HIDDEN
@@ -220,7 +236,7 @@ export default async function ChannelRoomPage({ params }: PageProps) {
 
   // Freeze the final leaderboard by W% once the room is COMPLETED; otherwise
   // keep the host's newest-first submission order.
-  const rankedSubmissions = completed
+  const rankedSubmissions = effectiveCompleted
     ? [...approvedSubmissions].sort((a, b) => {
         const ratioOrder = compareWinRatio(b, a);
         if (ratioOrder !== 0) return ratioOrder;
@@ -229,9 +245,9 @@ export default async function ChannelRoomPage({ params }: PageProps) {
     : approvedSubmissions;
 
   const champion =
-    completed && channel.championSubmissionId
+    effectiveCompleted && effectiveChampionId
       ? approvedSubmissions.find(
-          (submission) => submission.id === channel.championSubmissionId,
+          (submission) => submission.id === effectiveChampionId,
         )
       : undefined;
   const championSplit = champion ? getVoteSplit(champion) : null;
@@ -321,7 +337,7 @@ export default async function ChannelRoomPage({ params }: PageProps) {
             trackTitle={champion.trackTitle}
             winPct={championSplit.winPct}
             total={championSplit.total}
-            completedAt={channel.completedAt}
+            completedAt={effectiveCompletedAt}
           />
         </div>
       )}
@@ -379,8 +395,8 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                 <ul className="mt-5 grid gap-4">
                   {rankedSubmissions.map((submission, index) => {
                     const isChampion =
-                      completed &&
-                      submission.id === channel.championSubmissionId;
+                      effectiveCompleted &&
+                      submission.id === effectiveChampionId;
                     return (
                       <li
                         key={submission.id}
@@ -392,7 +408,7 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <p className="flex items-center gap-2 font-bold text-foreground">
-                            {completed && (
+                            {effectiveCompleted && (
                               <span className="font-mono text-xs text-muted-foreground">
                                 #{index + 1}
                               </span>

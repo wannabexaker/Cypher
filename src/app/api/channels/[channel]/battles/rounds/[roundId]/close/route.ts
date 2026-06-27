@@ -227,12 +227,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
         if (winners.length === 1) {
           championSubmissionId = winners[0];
           completed = true;
+          // H16b: channel-as-venue — the room flips BACK to OPEN once the
+          // bracket finishes (the BATTLE contest carries the champion).
+          // We clear the legacy `championSubmissionId`/`completedAt` writes
+          // since those now live on Contest.
           await transaction.channel.update({
             where: { id: channel.id },
             data: {
-              championSubmissionId,
-              status: ChannelStatus.COMPLETED,
-              completedAt: now,
+              status: ChannelStatus.OPEN,
               lastActivityAt: now,
             },
           });

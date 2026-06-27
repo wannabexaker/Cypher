@@ -34,10 +34,12 @@ export function ChannelBattleCreateControl({
     setError("");
 
     try {
-      const response = await fetch(`/api/channels/${channelId}/battles`, {
+      // H16b: bracket creation now goes through the unified contest
+      // endpoint so battles run under a Contest record (one create path).
+      const response = await fetch(`/api/channels/${channelId}/contests`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ k }),
+        body: JSON.stringify({ mode: "BATTLE", bracketSize: k }),
       });
       const payload = (await response.json()) as { error?: string };
 

@@ -1,10 +1,12 @@
 import {
+  ContestMode,
   MatchupStatus,
   RoundStatus,
   VoteChoice,
   type ChannelStatus,
 } from "@prisma/client";
 
+import { getLatestCompletedContest } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { getVoteSplit } from "@/lib/votes";
 
@@ -124,6 +126,14 @@ export async function getBattleState(
     round.matchups.map((matchup) => matchup.id),
   );
 
+  // H16b: the canonical bracket champion now lives on the latest COMPLETED
+  // BATTLE contest. Channel fields stay as a fallback for pre-H16b data.
+  const latestContest = await getLatestCompletedContest(
+    prisma,
+    channelId,
+    ContestMode.BATTLE,
+  );
+
   const [grouped, ownVotes] = await Promise.all([
     matchupIds.length === 0
       ? Promise.resolve([])
@@ -165,8 +175,9 @@ export async function getBattleState(
   return {
     channelId: channel.id,
     status: channel.status,
-    championSubmissionId: channel.championSubmissionId,
-    completedAt: channel.completedAt,
+    championSubmissionId:
+      latestContest?.championSubmissionId ?? channel.championSubmissionId,
+    completedAt: latestContest?.completedAt ?? channel.completedAt,
     rounds: channel.battleRounds.map((round) => ({
       id: round.id,
       roundNumber: round.roundNumber,

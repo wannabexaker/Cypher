@@ -120,25 +120,34 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
+  // H16b: every leaderboard-side vote now belongs to an active contest.
+  // No contest → no voting (the host has to start one first). This is what
+  // lets a brand-new contest re-open voting on the same approved tracks.
+  const activeContest = await getActiveContest(
+    prisma,
+    channel.id,
+    ContestMode.LEADERBOARD,
+  );
+  if (!activeContest) {
+    return NextResponse.json(
+      { error: "No active contest. Ask the host to start one." },
+      { status: 409 },
+    );
+  }
+
   // TODO: optional self-vote guard.
   // TODO: replace the basic DB IP cap with a Redis sliding window.
 
   try {
-    // H13: Use track-round-aware dedupe key if a round is open
+    // H13/H16b: TrackVoteRound votes still dedupe per round (their contestId
+    // is stamped via the round). Channel-wide qualifying votes dedupe per
+    // contest so a fresh leaderboard reopens W/L for the same identities.
     const dedupeKeyForIdentity = (identityKey: string) => {
       if (openRound) {
         return `tr:${openRound.id}:${identityKey}`;
       }
-      return `ch:${channel.id}:s:${submission.id}:${identityKey}`;
+      return `c:${activeContest.id}:s:${submission.id}:${identityKey}`;
     };
-
-    // H16a: resolve the active LEADERBOARD contest so this vote (and any
-    // participant tally update) is stamped with the right contestId.
-    const activeContest = await getActiveContest(
-      prisma,
-      channel.id,
-      ContestMode.LEADERBOARD,
-    );
 
     const result = await castWlVote({
       request,
@@ -151,7 +160,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
       turnstileToken: parsed.data.turnstileToken,
       dedupeKeyForIdentity,
       trackVoteRoundId: openRound?.id,
-      contestId: activeContest?.id,
+      contestId: activeContest.id,
+      // H16b: live mirror reflects this contest's votes only, not historical
+      // ones. For TrackVoteRound votes the round filter already narrows
+      // things; we keep the contest scope so the count agrees end-to-end.
+      tallyWhere: openRound
+        ? { contestId: activeContest.id }
+        : { contestId: activeContest.id, matchupId: null, trackVoteRoundId: null },
       updateAfterVote: async (transaction, counts) => {
         await transaction.submission.update({
           where: { id: submission.id },
@@ -161,20 +176,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
             voteCount: counts.total,
           },
         });
-        if (activeContest) {
-          // H16a: keep ContestParticipant counts in sync alongside the
-          // submission mirror so the new contest reads match the old reads.
-          await transaction.contestParticipant.updateMany({
-            where: {
-              contestId: activeContest.id,
-              submissionId: submission.id,
-            },
-            data: {
-              wins: counts.winCount,
-              losses: counts.lossCount,
-            },
-          });
-        }
+        // H16a/H16b: keep ContestParticipant counts in sync alongside the
+        // submission mirror so the new contest reads match the old reads.
+        await transaction.contestParticipant.updateMany({
+          where: {
+            contestId: activeContest.id,
+            submissionId: submission.id,
+          },
+          data: {
+            wins: counts.winCount,
+            losses: counts.lossCount,
+          },
+        });
       },
     });
 
