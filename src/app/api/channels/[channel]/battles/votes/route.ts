@@ -48,7 +48,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const channel = await prisma.channel.findUnique({
     where: { code: parsedCode.data },
-    select: { id: true },
+    select: {
+      id: true,
+      allowGuestVotes: true,
+      requireLoginToVote: true,
+    },
   });
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
@@ -57,6 +61,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // and "battle-ness" lives on the active BATTLE Contest checked below.
 
   const identity = await resolveChannelIdentity(request);
+  // H22 fix #3: honor per-channel guest-vote toggles for battle votes too —
+  // they were previously ignored, letting anonymous voters slip past a host
+  // who turned off guest voting.
+  if (!identity.user && (channel.allowGuestVotes === false || channel.requireLoginToVote === true)) {
+    return NextResponse.json(
+      { error: "Sign in to vote in this room." },
+      { status: 403 },
+    );
+  }
   const membership = await findChannelMembership(channel.id, identity);
   if (!membership) {
     return NextResponse.json(
@@ -145,8 +158,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
       fingerprint: parsed.data.fingerprint,
       turnstileToken: parsed.data.turnstileToken,
       contestId: activeContest.id,
+      // H22 fix #4: previously the dedupe key included `:s:${submissionId}`
+      // so one identity could vote for BOTH sides of the same matchup (the
+      // submission id made each side a distinct key). Make it matchup-scoped
+      // so the unique constraint in `Vote.dedupeKey` enforces "one vote per
+      // identity per matchup" — flipping sides now hits the `locked` path in
+      // cast-wl-vote and returns the original choice.
       dedupeKeyForIdentity: (identityKey) =>
-        `m:${matchup.id}:s:${parsed.data.submissionId}:${identityKey}`,
+        `m:${matchup.id}:${identityKey}`,
       tallyWhere: { matchupId: matchup.id },
     });
 

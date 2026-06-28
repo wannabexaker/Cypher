@@ -53,7 +53,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const channel = await prisma.channel.findUnique({
     where: { code: parsedCode.data },
-    select: { id: true, status: true, votingClosesAt: true },
+    select: {
+      id: true,
+      status: true,
+      votingClosesAt: true,
+      allowGuestVotes: true,
+      requireLoginToVote: true,
+    },
   });
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
@@ -107,6 +113,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const identity = await resolveChannelIdentity(request);
+  // H22 fix #3: enforce per-channel guest-vote toggles. Hosts can turn off
+  // anonymous voting (`allowGuestVotes=false`) or force account-only voting
+  // (`requireLoginToVote=true`); both meant guests must be blocked before we
+  // do any membership lookup or vote work.
+  if (!identity.user && (channel.allowGuestVotes === false || channel.requireLoginToVote === true)) {
+    return NextResponse.json(
+      { error: "Sign in to vote in this room." },
+      { status: 403 },
+    );
+  }
   const membership = await findChannelMembership(channel.id, identity);
   if (!membership) {
     return NextResponse.json(
@@ -151,10 +167,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
     activeContestId = contest.id;
     activeVotingClosesAt = contest.votingClosesAt;
   } else {
-    const actives = await getActiveContestsForMode(
+    // H22 fix #5: the dashboard intentionally surfaces DRAFT + VOTING_OPEN
+    // contests on its cards, so `getActiveContestsForMode` keeps that pair.
+    // For the vote-route fallback though, a DRAFT contest must NOT be
+    // auto-picked — only VOTING_OPEN contests accept votes. Filter inline so
+    // 0 → 409, 1 → use, 2+ → 400 CONTEST_REQUIRED based on the open subset.
+    const allActives = await getActiveContestsForMode(
       prisma,
       channel.id,
       ContestMode.LEADERBOARD,
+    );
+    const actives = allActives.filter(
+      (contest) => contest.status === ContestStatus.VOTING_OPEN,
     );
     if (actives.length === 0) {
       return NextResponse.json(

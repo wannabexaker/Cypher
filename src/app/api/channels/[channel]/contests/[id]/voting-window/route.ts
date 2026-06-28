@@ -1,7 +1,7 @@
 import { ContestStatus } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { canModerateChannel } from "@/lib/channels";
+import { canModerateChannel, resolveChannelByParam } from "@/lib/channels";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { contestTimerSchema } from "@/lib/validation/timer";
@@ -49,9 +49,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  const channel = await prisma.channel.findUnique({
-    where: { id: channelId },
-    select: { id: true, hostId: true },
+  const channel = await resolveChannelByParam(prisma, channelId, {
+    id: true,
+    hostId: true,
   });
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });

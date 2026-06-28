@@ -468,12 +468,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
       contest.votingClosesAt && Date.now() >= contest.votingClosesAt.getTime(),
     );
     const votingClosed = contestVotingClosed || channelVotingClosed;
+    // H22 fix #2: HIDDEN must never expose champion to non-members, even
+    // after completion. Only host/moderators see HIDDEN results; AFTER_CLOSE
+    // unlocks once that contest's voting closed/completed.
     const visible =
       callerIsHostOrModerator ||
       channel.resultsVisibility === ResultsVisibility.LIVE ||
       (channel.resultsVisibility === ResultsVisibility.AFTER_CLOSE &&
-        (votingClosed || contestCompleted || channelCompleted)) ||
-      (channel.resultsVisibility === ResultsVisibility.HIDDEN && contestCompleted);
+        (votingClosed || contestCompleted || channelCompleted));
 
     return {
       id: contest.id,

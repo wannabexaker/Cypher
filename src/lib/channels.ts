@@ -3,6 +3,7 @@ import { randomInt } from "node:crypto";
 import {
   MemberRole,
   Prisma,
+  type PrismaClient,
   Role,
   type User,
 } from "@prisma/client";
@@ -14,6 +15,28 @@ const CODE_LENGTH = 6;
 const MAX_CODE_ATTEMPTS = 8;
 
 export type ChannelManager = Pick<User, "id" | "role">;
+
+// H22 fix #1: the public room page is code-based (`/c/[code]/contest/[id]`),
+// so host-action routes that ride that page (voting-window, finalize, battle
+// round close) receive the 6-char CODE in the `[channel]` param — not the id.
+// `findUnique({ where: { id } })` silently 404s on the code. Resolve by either
+// id OR uppercased code so old (id-passing) and new (code-passing) callers
+// both work.
+type ChannelDb = PrismaClient | Prisma.TransactionClient;
+
+export async function resolveChannelByParam<
+  TSelect extends Prisma.ChannelSelect,
+>(
+  db: ChannelDb,
+  param: string,
+  select: TSelect,
+): Promise<Prisma.ChannelGetPayload<{ select: TSelect }> | null> {
+  if (!param) return null;
+  return db.channel.findFirst({
+    where: { OR: [{ id: param }, { code: param.toUpperCase() }] },
+    select,
+  }) as Promise<Prisma.ChannelGetPayload<{ select: TSelect }> | null>;
+}
 
 export function generateChannelCode() {
   return Array.from(

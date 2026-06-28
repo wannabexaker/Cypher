@@ -6,7 +6,7 @@ import {
 } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { canManageChannel } from "@/lib/channels";
+import { canManageChannel, resolveChannelByParam } from "@/lib/channels";
 import { bumpChannelActivity } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
@@ -52,9 +52,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Invalid round close details." }, { status: 400 });
   }
 
-  const channel = await prisma.channel.findUnique({
-    where: { id: channelId },
-    select: { id: true, hostId: true, status: true },
+  const channel = await resolveChannelByParam(prisma, channelId, {
+    id: true,
+    hostId: true,
+    status: true,
   });
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
