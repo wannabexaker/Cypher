@@ -47,6 +47,32 @@ export async function getActiveContest(
   return contest;
 }
 
+// H20a: concurrent contests need a way to ask "how many actives, and which".
+// Used by the votes route fallback path: with exactly one active LEADERBOARD
+// contest a `contestId`-less vote can target it; with two or more the route
+// returns 400 {code:"CONTEST_REQUIRED"} so callers pick explicitly.
+export type ActiveContestRow = {
+  id: string;
+  status: ContestStatus;
+  votingClosesAt: Date | null;
+};
+
+export async function getActiveContestsForMode(
+  db: Db,
+  channelId: string,
+  mode: ContestMode,
+): Promise<ActiveContestRow[]> {
+  return db.contest.findMany({
+    where: {
+      channelId,
+      mode,
+      status: { in: [ContestStatus.DRAFT, ContestStatus.VOTING_OPEN] },
+    },
+    select: { id: true, status: true, votingClosesAt: true },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 // H16b: return the most recently completed contest for a channel, optionally
 // filtered by mode. Reads consume this to render the venue's "current champion"
 // banner once the active contest closes — without any state living on Channel

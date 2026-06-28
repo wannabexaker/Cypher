@@ -1,6 +1,7 @@
 import {
   ChannelStatus,
   ContestMode,
+  ContestStatus,
   SubmissionStatus,
   RoundStatus,
 } from "@prisma/client";
@@ -11,7 +12,10 @@ import {
   VoteIpCapError,
   VoteTurnstileError,
 } from "@/lib/cast-wl-vote";
-import { bumpChannelActivity, getActiveContest } from "@/lib/contests";
+import {
+  bumpChannelActivity,
+  getActiveContestsForMode,
+} from "@/lib/contests";
 import {
   findChannelMembership,
   resolveChannelIdentity,
@@ -60,6 +64,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       { status: 409 },
     );
   }
+  // Keep the channel-level kill switch (back-compat with H13 PATCH /timer)
+  // as an upper bound — per-contest timers are checked below.
   if (channel.votingClosesAt && Date.now() >= channel.votingClosesAt.getTime()) {
     return NextResponse.json(
       { error: "Voting has closed for this room." },
@@ -82,7 +88,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  // H13: Check if this channel has a live track voting round
+  // H13: per-track voting round (separate windowing for a single track).
   const openRound = await prisma.trackVoteRound.findFirst({
     where: {
       submissionId: submission.id,
@@ -94,8 +100,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
       durationSeconds: true,
     },
   });
-
-  // If track has a voting round, enforce it; otherwise fall back to channel-wide voting
   if (openRound) {
     if (openRound.closesAt && Date.now() >= openRound.closesAt.getTime()) {
       return NextResponse.json(
@@ -103,12 +107,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
         { status: 409 },
       );
     }
-  } else if (!channel.votingClosesAt || Date.now() >= channel.votingClosesAt.getTime()) {
-    // Channel-wide voting closed
-    return NextResponse.json(
-      { error: "Voting has closed for this room." },
-      { status: 409 },
-    );
   }
 
   const identity = await resolveChannelIdentity(request);
@@ -120,18 +118,91 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  // H16b: every leaderboard-side vote now belongs to an active contest.
-  // No contest → no voting (the host has to start one first). This is what
-  // lets a brand-new contest re-open voting on the same approved tracks.
-  const activeContest = await getActiveContest(
-    prisma,
-    channel.id,
-    ContestMode.LEADERBOARD,
-  );
-  if (!activeContest) {
+  // H20a: resolve which contest this vote is for. Explicit `contestId` always
+  // wins. Otherwise fall back to "the one active LEADERBOARD" — exactly one
+  // active is fine, zero returns the legacy "no active contest" 409, and two
+  // or more returns 400 {code:"CONTEST_REQUIRED"} so the UI can pick.
+  let activeContestId: string;
+  let activeVotingClosesAt: Date | null = null;
+
+  if (parsed.data.contestId) {
+    const contest = await prisma.contest.findFirst({
+      where: { id: parsed.data.contestId, channelId: channel.id },
+      select: { id: true, status: true, votingClosesAt: true },
+    });
+    if (!contest) {
+      return NextResponse.json(
+        { error: "Contest not found." },
+        { status: 404 },
+      );
+    }
+    if (contest.status !== ContestStatus.VOTING_OPEN) {
+      return NextResponse.json(
+        { error: "This contest is not accepting votes." },
+        { status: 409 },
+      );
+    }
+    if (
+      contest.votingClosesAt &&
+      Date.now() >= contest.votingClosesAt.getTime()
+    ) {
+      return NextResponse.json(
+        { error: "Voting has closed for this contest." },
+        { status: 409 },
+      );
+    }
+    activeContestId = contest.id;
+    activeVotingClosesAt = contest.votingClosesAt;
+  } else {
+    const actives = await getActiveContestsForMode(
+      prisma,
+      channel.id,
+      ContestMode.LEADERBOARD,
+    );
+    if (actives.length === 0) {
+      return NextResponse.json(
+        { error: "No active contest. Ask the host to start one." },
+        { status: 409 },
+      );
+    }
+    if (actives.length > 1) {
+      return NextResponse.json(
+        {
+          error: "Multiple contests are active — choose which one to vote in.",
+          code: "CONTEST_REQUIRED",
+        },
+        { status: 400 },
+      );
+    }
+    const only = actives[0];
+    if (
+      only.votingClosesAt &&
+      Date.now() >= only.votingClosesAt.getTime()
+    ) {
+      return NextResponse.json(
+        { error: "Voting has closed for this contest." },
+        { status: 409 },
+      );
+    }
+    activeContestId = only.id;
+    activeVotingClosesAt = only.votingClosesAt;
+  }
+  void activeVotingClosesAt;
+
+  // Submission must be a participant of the chosen contest. This is how
+  // disqualified / non-included tracks get rejected once concurrent contests
+  // each have their own roster.
+  const participant = await prisma.contestParticipant.findFirst({
+    where: {
+      contestId: activeContestId,
+      submissionId: submission.id,
+    },
+    select: { id: true },
+  });
+  if (!participant) {
     return NextResponse.json(
-      { error: "No active contest. Ask the host to start one." },
-      { status: 409 },
+      { error: "Track is not part of this contest." },
+      { status: 404 },
     );
   }
 
@@ -139,14 +210,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // TODO: replace the basic DB IP cap with a Redis sliding window.
 
   try {
-    // H13/H16b: TrackVoteRound votes still dedupe per round (their contestId
-    // is stamped via the round). Channel-wide qualifying votes dedupe per
-    // contest so a fresh leaderboard reopens W/L for the same identities.
+    // H13/H16b: TrackVoteRound votes dedupe per round, channel-wide
+    // qualifying votes dedupe per contest so a fresh contest reopens W/L
+    // for the same identities.
     const dedupeKeyForIdentity = (identityKey: string) => {
       if (openRound) {
         return `tr:${openRound.id}:${identityKey}`;
       }
-      return `c:${activeContest.id}:s:${submission.id}:${identityKey}`;
+      return `c:${activeContestId}:s:${submission.id}:${identityKey}`;
     };
 
     const result = await castWlVote({
@@ -160,27 +231,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
       turnstileToken: parsed.data.turnstileToken,
       dedupeKeyForIdentity,
       trackVoteRoundId: openRound?.id,
-      contestId: activeContest.id,
-      // H16b: live mirror reflects this contest's votes only, not historical
-      // ones. For TrackVoteRound votes the round filter already narrows
-      // things; we keep the contest scope so the count agrees end-to-end.
+      contestId: activeContestId,
       tallyWhere: openRound
-        ? { contestId: activeContest.id }
-        : { contestId: activeContest.id, matchupId: null, trackVoteRoundId: null },
-      updateAfterVote: async (transaction, counts) => {
-        await transaction.submission.update({
-          where: { id: submission.id },
-          data: {
-            winCount: counts.winCount,
-            lossCount: counts.lossCount,
-            voteCount: counts.total,
+        ? { contestId: activeContestId }
+        : {
+            contestId: activeContestId,
+            matchupId: null,
+            trackVoteRoundId: null,
           },
-        });
-        // H16a/H16b: keep ContestParticipant counts in sync alongside the
-        // submission mirror so the new contest reads match the old reads.
+      updateAfterVote: async (transaction, counts) => {
+        // H20a: ContestParticipant is the per-contest source of truth. The
+        // denormalised Submission counter mirror is gone — concurrent
+        // contests can't share one counter without lying to one of them.
         await transaction.contestParticipant.updateMany({
           where: {
-            contestId: activeContest.id,
+            contestId: activeContestId,
             submissionId: submission.id,
           },
           data: {
@@ -198,6 +263,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json(
       {
         submissionId: submission.id,
+        contestId: activeContestId,
         winCount: result.winCount,
         lossCount: result.lossCount,
         total: result.total,

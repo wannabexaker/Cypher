@@ -11,7 +11,6 @@ import {
 import { type NextRequest, NextResponse } from "next/server";
 
 import { canManageChannel, canModerateChannel } from "@/lib/channels";
-import { getActiveContest } from "@/lib/contests";
 import {
   findChannelMembership,
   resolveChannelIdentity,
@@ -27,10 +26,9 @@ type RouteContext = {
   params: Promise<{ channel: string }>;
 };
 
-class ContestAlreadyActiveError extends Error {}
-
-// H16b: a single entry point to start a contest in a channel. Replaces the
-// old POST /battles seeding path so there is one "create a contest" route.
+// H20a: a single entry point to start a contest in a channel. Concurrent
+// contests are now allowed (any mode mix) — every create assigns the next
+// per-channel-per-mode sequence `number` inside the transaction.
 // Auth widens to canModerateChannel (host, ADMIN, or channel MODERATOR).
 export async function POST(request: NextRequest, context: RouteContext) {
   const user = await getCurrentUser();
@@ -77,23 +75,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
+  // H20a: channel.status is no longer the "is the room busy" gate — a single
+  // OPEN room can host many concurrent contests. We still require the room to
+  // be OPEN as a coarse "not archived/completed" check (legacy COMPLETED rooms
+  // are read-only). Battle-create no longer flips this to BATTLE either.
   if (channel.status !== ChannelStatus.OPEN) {
     return NextResponse.json(
       { error: "Only an open room can start a new contest." },
-      { status: 409 },
-    );
-  }
-
-  // Single-active-contest invariant across both modes — checking either mode
-  // is enough because the room cannot be OPEN while a BATTLE is in progress
-  // and we forbid stacking LEADERBOARDs.
-  const [activeLb, activeBattle] = await Promise.all([
-    getActiveContest(prisma, channel.id, ContestMode.LEADERBOARD),
-    getActiveContest(prisma, channel.id, ContestMode.BATTLE),
-  ]);
-  if (activeLb || activeBattle) {
-    return NextResponse.json(
-      { error: "A contest is already running in this room." },
       { status: 409 },
     );
   }
@@ -120,27 +108,31 @@ export async function POST(request: NextRequest, context: RouteContext) {
     try {
       const result = await prisma.$transaction(
         async (transaction) => {
-          // H17 item 5: re-check the single-active-contest invariant inside
-          // the transaction (mirrors the BATTLE branch's stillActive guard) so
-          // two simultaneous LEADERBOARD POSTs cannot both win the precheck.
-          const stillActive = await transaction.contest.findFirst({
+          // H20a: assign the next 1-based sequence number scoped to this
+          // channel+mode. Same SERIALIZABLE isolation guards us against two
+          // concurrent creates picking the same number (the second tx will
+          // retry on a conflict).
+          const sameModeCount = await transaction.contest.count({
             where: {
               channelId: channel.id,
-              status: { in: [ContestStatus.DRAFT, ContestStatus.VOTING_OPEN] },
+              mode: ContestMode.LEADERBOARD,
             },
-            select: { id: true },
           });
-          if (stillActive) {
-            throw new ContestAlreadyActiveError();
-          }
 
           const contest = await transaction.contest.create({
             data: {
               channelId: channel.id,
               mode: ContestMode.LEADERBOARD,
               status: ContestStatus.VOTING_OPEN,
+              number: sameModeCount + 1,
             },
-            select: { id: true, mode: true, status: true, createdAt: true },
+            select: {
+              id: true,
+              mode: true,
+              status: true,
+              createdAt: true,
+              number: true,
+            },
           });
 
           await transaction.contestParticipant.createMany({
@@ -152,13 +144,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
             })),
           });
 
-          // Reset the denormalised live counters so the new contest starts at 0
-          // votes. ContestParticipant.wins/losses is the authoritative per-contest
-          // record; the Submission mirror just powers UI on the active contest.
-          await transaction.submission.updateMany({
-            where: { channelId: channel.id, status: SubmissionStatus.APPROVED },
-            data: { winCount: 0, lossCount: 0, voteCount: 0 },
-          });
+          // H20a: do NOT reset Submission.winCount/lossCount/voteCount on
+          // contest create. With concurrent contests the denormalised
+          // Submission counters can't represent N active contests at once;
+          // ContestParticipant.wins/losses is the per-contest source of truth.
 
           await transaction.channel.update({
             where: { id: channel.id },
@@ -174,6 +163,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
               metadata: {
                 channelId: channel.id,
                 mode: ContestMode.LEADERBOARD,
+                number: contest.number,
                 participants: approved.length,
               },
             },
@@ -189,17 +179,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
           id: result.id,
           mode: result.mode,
           status: result.status,
+          number: result.number,
           createdAt: result.createdAt,
         },
         { status: 201 },
       );
     } catch (error) {
-      if (error instanceof ContestAlreadyActiveError) {
-        return NextResponse.json(
-          { error: "A contest is already running in this room." },
-          { status: 409 },
-        );
-      }
       console.error("Contest create failed", error);
       return NextResponse.json(
         { error: "Unable to start the contest right now." },
@@ -288,16 +273,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const created = await prisma.$transaction(
       async (transaction) => {
-        const stillActive = await transaction.contest.findFirst({
+        const sameModeCount = await transaction.contest.count({
           where: {
             channelId: channel.id,
-            status: { in: [ContestStatus.DRAFT, ContestStatus.VOTING_OPEN] },
+            mode: ContestMode.BATTLE,
           },
-          select: { id: true },
         });
-        if (stillActive) {
-          throw new ContestAlreadyActiveError();
-        }
 
         const battleContest = await transaction.contest.create({
           data: {
@@ -305,8 +286,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
             mode: ContestMode.BATTLE,
             status: ContestStatus.VOTING_OPEN,
             bracketSize,
+            number: sameModeCount + 1,
           },
-          select: { id: true, mode: true, status: true, createdAt: true },
+          select: {
+            id: true,
+            mode: true,
+            status: true,
+            createdAt: true,
+            number: true,
+          },
         });
 
         const round = await transaction.battleRound.create({
@@ -340,14 +328,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
           })),
         });
 
+        // H20a: channel-as-venue — do NOT flip channel.status to BATTLE.
+        // The room stays OPEN regardless; "battle-ness" lives on the Contest.
         await transaction.channel.update({
           where: { id: channel.id },
-          data: {
-            status: ChannelStatus.BATTLE,
-            championSubmissionId: null,
-            completedAt: null,
-            lastActivityAt: new Date(),
-          },
+          data: { lastActivityAt: new Date() },
         });
 
         await transaction.auditLog.create({
@@ -359,6 +344,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
             metadata: {
               channelId: channel.id,
               mode: ContestMode.BATTLE,
+              number: battleContest.number,
               bracketSize,
               roundId: round.id,
             },
@@ -375,18 +361,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
         id: created.id,
         mode: created.mode,
         status: created.status,
+        number: created.number,
         createdAt: created.createdAt,
         bracketSize,
       },
       { status: 201 },
     );
   } catch (error) {
-    if (error instanceof ContestAlreadyActiveError) {
-      return NextResponse.json(
-        { error: "A contest is already running in this room." },
-        { status: 409 },
-      );
-    }
     console.error("Contest create failed", error);
     return NextResponse.json(
       { error: "Unable to start the contest right now." },
@@ -395,11 +376,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 }
 
-// H17 item 3: public list of every contest that ever ran in a channel
-// (newest first). Accepts the channel id OR the 6-char code so the public
-// room page and the dashboard can both hit it. Results visibility gating
-// mirrors GET /results — non-mod callers see no championSubmissionId /
+// H17 item 3 / H20a item 5: public list of every contest that ever ran in a
+// channel (newest first). Accepts the channel id OR the 6-char code so the
+// public room page and the dashboard can both hit it. Results visibility
+// gating mirrors GET /results — non-mod callers see no championSubmissionId /
 // championTitle when the channel hides results for that contest.
+//
+// H20a extends each row with `number`, `votingClosesAt`, `participantCount`
+// and `totalVotes` so the upcoming room-side "Active contests" + "Past
+// contests" cards have a single source of truth.
 export async function GET(request: NextRequest, context: RouteContext) {
   const { channel: channelKey } = await context.params;
   if (!channelKey) {
@@ -435,12 +420,17 @@ export async function GET(request: NextRequest, context: RouteContext) {
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
+      number: true,
       mode: true,
       status: true,
       bracketSize: true,
+      votingClosesAt: true,
       createdAt: true,
       completedAt: true,
       championSubmissionId: true,
+      _count: {
+        select: { participants: true, votes: true },
+      },
     },
   });
 
@@ -462,15 +452,22 @@ export async function GET(request: NextRequest, context: RouteContext) {
   );
 
   const channelCompleted = channel.status === ChannelStatus.COMPLETED;
-  const votingClosed = Boolean(
+  const channelVotingClosed = Boolean(
     channel.votingClosesAt && Date.now() >= channel.votingClosesAt.getTime(),
   );
 
   const items = contests.map((contest) => {
     const contestCompleted = contest.status === ContestStatus.COMPLETED;
-    // A contest's champion is "visible" when the channel-level visibility rule
-    // would expose results for THIS contest. Hidden until completion under
-    // HIDDEN; until close (or completion) under AFTER_CLOSE; always under LIVE.
+    // H20a: prefer the contest's own votingClosesAt when present; fall back to
+    // the channel-level one so back-compat callers (pre-per-contest-timer
+    // contests) still get a "closed" signal. A contest's champion is "visible"
+    // when the channel-level visibility rule would expose results for THIS
+    // contest. Hidden until completion under HIDDEN; until close (or
+    // completion) under AFTER_CLOSE; always under LIVE.
+    const contestVotingClosed = Boolean(
+      contest.votingClosesAt && Date.now() >= contest.votingClosesAt.getTime(),
+    );
+    const votingClosed = contestVotingClosed || channelVotingClosed;
     const visible =
       callerIsHostOrModerator ||
       channel.resultsVisibility === ResultsVisibility.LIVE ||
@@ -480,11 +477,17 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     return {
       id: contest.id,
+      number: contest.number,
       mode: contest.mode,
       status: contest.status,
       bracketSize: contest.bracketSize,
+      votingClosesAt: contest.votingClosesAt
+        ? contest.votingClosesAt.toISOString()
+        : null,
       createdAt: contest.createdAt.toISOString(),
       completedAt: contest.completedAt ? contest.completedAt.toISOString() : null,
+      participantCount: contest._count.participants,
+      totalVotes: contest._count.votes,
       championSubmissionId: visible ? contest.championSubmissionId : null,
       championTitle:
         visible && contest.championSubmissionId

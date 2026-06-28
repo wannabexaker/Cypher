@@ -1,7 +1,4 @@
-import {
-  ChannelStatus,
-  ResultsVisibility,
-} from "@prisma/client";
+import { ChannelStatus, ResultsVisibility } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { getBattleState } from "@/lib/battles";
@@ -43,15 +40,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
   }
-  if (
-    channel.status !== ChannelStatus.BATTLE &&
-    channel.status !== ChannelStatus.COMPLETED
-  ) {
-    return NextResponse.json(
-      { error: "Battle bracket is not available for this room." },
-      { status: 409 },
-    );
-  }
+  // H20a: no more channel.status gate. The room stays OPEN forever and may
+  // have many concurrent contests; getBattleState returns an empty bracket
+  // when no rounds exist (the caller handles "no active battle").
 
   const identity = await resolveChannelIdentity(request);
   const membership = await findChannelMembership(channel.id, identity);

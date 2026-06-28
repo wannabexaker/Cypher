@@ -1,5 +1,4 @@
 import {
-  ChannelStatus,
   ContestMode,
   MatchupStatus,
   RoundStatus,
@@ -49,17 +48,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const channel = await prisma.channel.findUnique({
     where: { code: parsedCode.data },
-    select: { id: true, status: true },
+    select: { id: true },
   });
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
   }
-  if (channel.status !== ChannelStatus.BATTLE) {
-    return NextResponse.json(
-      { error: "Battle voting is only open while the room is in battle mode." },
-      { status: 409 },
-    );
-  }
+  // H20a: no more channel.status === BATTLE gate. The room stays OPEN forever
+  // and "battle-ness" lives on the active BATTLE Contest checked below.
 
   const identity = await resolveChannelIdentity(request);
   const membership = await findChannelMembership(channel.id, identity);
@@ -112,9 +107,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   try {
     // H16a/H16b: every matchup vote belongs to an active BATTLE contest.
-    // 409 if none — the room is in BATTLE mode but no contest is running
-    // (shouldn't happen via the new flow, but keeps the gate symmetric with
-    // leaderboard voting and surfaces broken state instead of swallowing it).
+    // 409 if none. H20a: also enforce the contest's per-contest voting
+    // window — battle contests can now arm their own deadline.
     const activeContest = await getActiveContest(
       prisma,
       channel.id,
@@ -123,6 +117,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (!activeContest) {
       return NextResponse.json(
         { error: "No active battle contest." },
+        { status: 409 },
+      );
+    }
+    const contestWindow = await prisma.contest.findUnique({
+      where: { id: activeContest.id },
+      select: { votingClosesAt: true },
+    });
+    if (
+      contestWindow?.votingClosesAt &&
+      Date.now() >= contestWindow.votingClosesAt.getTime()
+    ) {
+      return NextResponse.json(
+        { error: "Voting has closed for this contest." },
         { status: 409 },
       );
     }

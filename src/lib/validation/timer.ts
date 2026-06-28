@@ -10,3 +10,9 @@ export const channelTimerSchema = z.discriminatedUnion("action", [
 ]);
 
 export type ChannelTimerInput = z.infer<typeof channelTimerSchema>;
+
+// H20a: per-contest voting window. Same shape as the channel timer above; the
+// route applies it to Contest.votingClosesAt instead of Channel.votingClosesAt.
+export const contestTimerSchema = channelTimerSchema;
+export type ContestTimerInput = z.infer<typeof contestTimerSchema>;
+

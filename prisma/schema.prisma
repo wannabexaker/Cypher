@@ -504,6 +504,10 @@ model Contest {
   channelId            String            @map("channel_id")
   mode                 ContestMode
   status               ContestStatus     @default(DRAFT)
+  // H20a: per-channel-per-mode sequence (1-based). Computed at create time
+  // inside the create transaction so concurrent contests still get unique
+  // numbers; nullable for the duration of the backfill migration window.
+  number               Int?
   bracketSize          Int?              @map("bracket_size")           // BATTLE only
   title                String?
   votingClosesAt       DateTime?         @map("voting_closes_at")
