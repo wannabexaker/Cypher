@@ -64,14 +64,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
       { status: 409 },
     );
   }
-  // Keep the channel-level kill switch (back-compat with H13 PATCH /timer)
-  // as an upper bound — per-contest timers are checked below.
-  if (channel.votingClosesAt && Date.now() >= channel.votingClosesAt.getTime()) {
-    return NextResponse.json(
-      { error: "Voting has closed for this room." },
-      { status: 409 },
-    );
-  }
+  // H20a review-fix: the channel-level `votingClosesAt` kill switch is gone.
+  // Under the contest model voting is gated per-contest (status VOTING_OPEN +
+  // the contest's own votingClosesAt, checked below). A stale legacy
+  // channel.votingClosesAt (set by a pre-reframe finalize/timer) must NOT
+  // block a freshly-started contest — that was blocking every reframed room.
 
   const submission = await prisma.submission.findFirst({
     where: {
