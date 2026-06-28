@@ -1,12 +1,13 @@
 "use client";
 
-import { History, Link2, LoaderCircle, Music2, UploadCloud } from "lucide-react";
+import { History, Link2, LoaderCircle, Music2, Sparkles, UploadCloud } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { classifyEmbedUrl, type EmbedSourceType } from "@/lib/embeds";
 import { MAX_UPLOAD_BYTES } from "@/lib/media";
 
 import {
@@ -45,6 +46,20 @@ type SubmitTrackPanelProps = {
 type Mode = "file" | "embed";
 
 const MAX_MB = Math.round(MAX_UPLOAD_BYTES / (1024 * 1024));
+const OEMBED_DEBOUNCE_MS = 400;
+
+const PROVIDER_LABELS: Record<EmbedSourceType, string> = {
+  SPOTIFY: "Spotify",
+  SOUNDCLOUD: "SoundCloud",
+  YOUTUBE: "YouTube",
+};
+
+type EmbedMetaState = {
+  provider: EmbedSourceType;
+  title: string | null;
+  artist: string | null;
+  thumbnailUrl: string | null;
+};
 
 function mimeFromFilename(name: string): "audio/mpeg" | "audio/wav" | null {
   const ext = name.split(".").pop()?.toLowerCase();
@@ -70,14 +85,102 @@ export function SubmitTrackPanel({
   >("idle");
   const [error, setError] = useState("");
 
+  // H19: oEmbed auto-title. We only prefill into a field the user hasn't
+  // manually touched. Pre-populated values from mySubmission count as
+  // "edited" so a returning user's data is never clobbered by a paste.
+  const [titleEdited, setTitleEdited] = useState(
+    Boolean(mySubmission?.trackTitle && mySubmission.trackTitle.trim().length > 0),
+  );
+  const [artistEdited, setArtistEdited] = useState(
+    Boolean(mySubmission?.artistName && mySubmission.artistName.trim().length > 0),
+  );
+  const [embedMeta, setEmbedMeta] = useState<EmbedMetaState | null>(null);
+  const [embedFetching, setEmbedFetching] = useState(false);
+
   const locked = mySubmission?.status === "APPROVED";
   const busy = phase !== "idle";
+
+  // H19: when the embed URL changes and classifies to a known provider, hit
+  // /api/oembed and prefill empty/unedited title/artist fields. classify
+  // runs client-side so we skip the network entirely for non-provider input.
+  useEffect(() => {
+    if (mode !== "embed") {
+      setEmbedMeta(null);
+      setEmbedFetching(false);
+      return;
+    }
+    const trimmed = externalUrl.trim();
+    if (!trimmed) {
+      setEmbedMeta(null);
+      setEmbedFetching(false);
+      return;
+    }
+    const classified = classifyEmbedUrl(trimmed);
+    if (!classified) {
+      setEmbedMeta(null);
+      setEmbedFetching(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setEmbedFetching(true);
+      try {
+        const response = await fetch(
+          `/api/oembed?url=${encodeURIComponent(classified.normalizedUrl)}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) {
+          setEmbedMeta(null);
+          return;
+        }
+        const data = (await response.json()) as {
+          provider?: EmbedSourceType;
+          title?: string | null;
+          artist?: string | null;
+          thumbnailUrl?: string | null;
+        };
+        const provider = data.provider ?? classified.sourceType;
+        const title = typeof data.title === "string" ? data.title : null;
+        const artist = typeof data.artist === "string" ? data.artist : null;
+        const thumbnailUrl =
+          typeof data.thumbnailUrl === "string" ? data.thumbnailUrl : null;
+
+        setEmbedMeta({ provider, title, artist, thumbnailUrl });
+
+        if (title && (!titleEdited || trackTitle.trim() === "")) {
+          setTrackTitle(title);
+          setTitleEdited(false);
+        }
+        if (artist && (!artistEdited || artistName.trim() === "")) {
+          setArtistName(artist);
+          setArtistEdited(false);
+        }
+      } catch (fetchError) {
+        if ((fetchError as Error).name !== "AbortError") {
+          setEmbedMeta(null);
+        }
+      } finally {
+        setEmbedFetching(false);
+      }
+    }, OEMBED_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+    // We intentionally exclude trackTitle / artistName / *Edited from deps:
+    // the effect should re-run only when the URL or mode changes, not on
+    // every keystroke in the prefilled fields (that would loop).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalUrl, mode]);
 
   // H14: prefill from a previous submission. Embed → title + URL (link is
   // re-usable). File → title only (the artist must upload a new file because
   // each MediaAsset is one-shot bound to a submission).
   function reuseSubmission(entry: RecentSubmission) {
     setTrackTitle(entry.trackTitle);
+    setTitleEdited(true);
     setError("");
     if (entry.sourceType.startsWith("FILE")) {
       setMode("file");
@@ -360,6 +463,51 @@ export function SubmitTrackPanel({
                   value={externalUrl}
                   onChange={(event) => setExternalUrl(event.target.value)}
                 />
+                {(embedFetching || embedMeta) && (
+                  <div className="mt-3 flex items-start gap-3 rounded-md border border-border bg-background px-3 py-2">
+                    {embedMeta?.thumbnailUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={embedMeta.thumbnailUrl}
+                        alt=""
+                        className="size-10 shrink-0 rounded object-cover"
+                      />
+                    ) : (
+                      <Sparkles
+                        className="size-4 shrink-0 text-cyan"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <div className="min-w-0 text-xs leading-5">
+                      {embedFetching && (
+                        <p className="text-muted-foreground">
+                          Fetching track details…
+                        </p>
+                      )}
+                      {!embedFetching && embedMeta && embedMeta.title && (
+                        <p className="text-muted-foreground">
+                          <span className="font-bold text-foreground">
+                            {embedMeta.title}
+                          </span>
+                          {embedMeta.artist && (
+                            <span className="text-muted-foreground">
+                              {" "}— {embedMeta.artist}
+                            </span>
+                          )}
+                          <span className="ml-1 font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase">
+                            · fetched from {PROVIDER_LABELS[embedMeta.provider]}
+                          </span>
+                        </p>
+                      )}
+                      {!embedFetching && embedMeta && !embedMeta.title && (
+                        <p className="text-muted-foreground">
+                          {PROVIDER_LABELS[embedMeta.provider]} didn’t return a
+                          title — type it manually below.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -377,7 +525,10 @@ export function SubmitTrackPanel({
                   maxLength={60}
                   placeholder="MC Handle"
                   value={artistName}
-                  onChange={(event) => setArtistName(event.target.value)}
+                  onChange={(event) => {
+                    setArtistName(event.target.value);
+                    setArtistEdited(true);
+                  }}
                 />
               </div>
               <div>
@@ -393,7 +544,10 @@ export function SubmitTrackPanel({
                   maxLength={120}
                   placeholder="Bars at midnight"
                   value={trackTitle}
-                  onChange={(event) => setTrackTitle(event.target.value)}
+                  onChange={(event) => {
+                    setTrackTitle(event.target.value);
+                    setTitleEdited(true);
+                  }}
                 />
               </div>
             </div>
