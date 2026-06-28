@@ -73,6 +73,80 @@ export async function getActiveContestsForMode(
   });
 }
 
+// H20b: room-page surface — list every active (DRAFT or VOTING_OPEN) contest
+// in a channel across both modes so the room can render an "Active contests"
+// card grid. Returns enough metadata for the cards (mode badge, #number,
+// timer, participant + vote counts) without follow-up queries.
+export type ActiveContestSummary = {
+  id: string;
+  mode: ContestMode;
+  status: ContestStatus;
+  number: number | null;
+  bracketSize: number | null;
+  votingClosesAt: Date | null;
+  createdAt: Date;
+  participantCount: number;
+  totalVotes: number;
+};
+
+export async function getActiveContestsForChannel(
+  db: Db,
+  channelId: string,
+): Promise<ActiveContestSummary[]> {
+  const rows = await db.contest.findMany({
+    where: {
+      channelId,
+      status: { in: [ContestStatus.DRAFT, ContestStatus.VOTING_OPEN] },
+    },
+    select: {
+      id: true,
+      mode: true,
+      status: true,
+      number: true,
+      bracketSize: true,
+      votingClosesAt: true,
+      createdAt: true,
+      _count: { select: { participants: true, votes: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    mode: row.mode,
+    status: row.status,
+    number: row.number,
+    bracketSize: row.bracketSize,
+    votingClosesAt: row.votingClosesAt,
+    createdAt: row.createdAt,
+    participantCount: row._count.participants,
+    totalVotes: row._count.votes,
+  }));
+}
+
+// H20b: redirect helper for the legacy `/c/[code]/battle` page. Picks the
+// active BATTLE contest if any (most recent), else the most recent BATTLE
+// contest regardless of status, so /battle URLs keep landing on a useful page.
+export async function getLatestBattleContest(
+  db: Db,
+  channelId: string,
+): Promise<{ id: string; status: ContestStatus } | null> {
+  const active = await db.contest.findFirst({
+    where: {
+      channelId,
+      mode: ContestMode.BATTLE,
+      status: { in: [ContestStatus.DRAFT, ContestStatus.VOTING_OPEN] },
+    },
+    select: { id: true, status: true },
+    orderBy: { createdAt: "desc" },
+  });
+  if (active) return active;
+  return db.contest.findFirst({
+    where: { channelId, mode: ContestMode.BATTLE },
+    select: { id: true, status: true },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 // H16b: return the most recently completed contest for a channel, optionally
 // filtered by mode. Reads consume this to render the venue's "current champion"
 // banner once the active contest closes — without any state living on Channel

@@ -1,26 +1,32 @@
 import {
   ChannelStatus,
   ContestMode,
-  ResultsVisibility,
   SubmissionStatus,
 } from "@prisma/client";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Crown, Gavel, ListMusic, Radio, ShieldAlert, ScrollText, Users } from "lucide-react";
+import {
+  Flag,
+  Gavel,
+  ListMusic,
+  Radio,
+  ScrollText,
+  ShieldAlert,
+  Sparkles,
+  Swords,
+  Trophy,
+  Users,
+} from "lucide-react";
 
-import { ChampionBanner } from "@/components/channels/ChampionBanner";
 import { ChannelDeleteControl } from "@/components/channels/ChannelDeleteControl";
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { CopyButton } from "@/components/channels/CopyButton";
 import { JoinRoomPanel } from "@/components/channels/JoinRoomPanel";
-import { LeaderboardRankings } from "@/components/contests/LeaderboardRankings";
 import { ModeStandingsTable } from "@/components/contests/ModeStandingsTable";
 import { PastContestsBrowser } from "@/components/contests/PastContestsBrowser";
-import { PodiumTop3 } from "@/components/contests/PodiumTop3";
 import { PushOptIn } from "@/components/notifications/PushOptIn";
-import { RoomBanner } from "@/components/notifications/RoomBanner";
 import {
   SubmissionStatusPill,
   type SubmissionStatusValue,
@@ -29,9 +35,7 @@ import { SubmitTrackPanel } from "@/components/submissions/SubmitTrackPanel";
 import { TrackPlayer } from "@/components/submissions/TrackPlayer";
 import { DisqualifyTrackButton } from "@/components/submissions/DisqualifyTrackButton";
 import { buttonVariants } from "@/components/ui/button";
-import { VoteControl } from "@/components/voting/VoteControl";
 import { VotingCountdown } from "@/components/voting/VotingCountdown";
-import { TrackRoundControl } from "@/components/voting/TrackRoundControl";
 import {
   GUEST_COOKIE_NAME,
   readGuestToken,
@@ -40,12 +44,10 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { canManageChannel } from "@/lib/channels";
 import {
-  getLatestCompletedContest,
+  getActiveContestsForChannel,
   getModeStandings,
-  parseRankingSnapshot,
 } from "@/lib/contests";
 import { channelCodeSchema } from "@/lib/validation/channels";
-import { compareWinRatio, getVoteSplit } from "@/lib/votes";
 
 export const metadata: Metadata = {
   title: "Channel room",
@@ -86,9 +88,6 @@ export default async function ChannelRoomPage({ params }: PageProps) {
   });
 
   if (!channel) notFound();
-  if (channel.status === ChannelStatus.BATTLE) {
-    redirect(`/c/${channel.code}/battle`);
-  }
 
   const membership = user
     ? await prisma.channelMember.findUnique({
@@ -110,7 +109,11 @@ export default async function ChannelRoomPage({ params }: PageProps) {
         })
       : null;
 
-  const [approvedSubmissions, mySubmission, ownVotes] = await Promise.all([
+  // H20b: voting is now per-contest, so the room-level query no longer needs
+  // win/loss mirrors, round metadata, or the caller's vote history. The room
+  // page is a venue — it lists what's been approved + links into the active
+  // contests where voting actually happens.
+  const [approvedSubmissions, mySubmission] = await Promise.all([
     prisma.submission.findMany({
       where: { channelId: channel.id, status: SubmissionStatus.APPROVED },
       orderBy: { createdAt: "desc" },
@@ -123,24 +126,8 @@ export default async function ChannelRoomPage({ params }: PageProps) {
         externalUrl: true,
         mediaAssetId: true,
         submitterMemberId: true, // H14: needed for FILE playback gate
-        winCount: true,
-        lossCount: true,
-        roundResultMode: true, // H13
         submitterMember: {
-          select: { displayName: true }, // H13: uploader name
-        },
-        trackVoteRounds: {
-          // H13: fetch rounds
-          orderBy: { index: "asc" },
-          select: {
-            id: true,
-            index: true,
-            status: true,
-            durationSeconds: true,
-            openedAt: true,
-            closesAt: true,
-            closedAt: true,
-          },
+          select: { displayName: true },
         },
       },
     }),
@@ -163,20 +150,6 @@ export default async function ChannelRoomPage({ params }: PageProps) {
           },
         })
       : null,
-    membership
-      ? prisma.vote.findMany({
-          where: {
-            channelId: channel.id,
-            isValid: true,
-            submission: { status: SubmissionStatus.APPROVED },
-            ...(user
-              ? { voterUserId: user.id }
-              : { cookieToken: guestToken }),
-          },
-          orderBy: { createdAt: "desc" },
-          select: { submissionId: true, choice: true },
-        })
-      : [],
   ]);
 
   // H14: caller's last 5 submissions (account-wide for users, per-guest-token
@@ -201,125 +174,18 @@ export default async function ChannelRoomPage({ params }: PageProps) {
     : [];
 
   const isOpen = channel.status === ChannelStatus.OPEN;
-  const completed = channel.status === ChannelStatus.COMPLETED;
-  // H16b: completed-room reads (champion banner, leaderboard freeze) now
-  // pull from the latest COMPLETED LEADERBOARD contest with the legacy
-  // channel fields as a fallback for pre-H16b rooms.
-  const latestContest = await getLatestCompletedContest(
-    prisma,
-    channel.id,
-    ContestMode.LEADERBOARD,
-  );
-  const effectiveChampionId =
-    latestContest?.championSubmissionId ?? channel.championSubmissionId ?? null;
-  const effectiveCompletedAt =
-    latestContest?.completedAt ?? channel.completedAt ?? null;
-  const contestCompleted = Boolean(latestContest);
-  const effectiveCompleted = completed || contestCompleted;
-  const votingClosed = Boolean(
-    channel.votingClosesAt &&
-      channel.votingClosesAt.getTime() <= Date.now(),
-  );
-  const canVote = Boolean(membership && isOpen && !votingClosed);
-  const voteDisabledReason = votingClosed
-    ? "Voting has closed for this room."
-    : membership
-      ? "Voting is available while this room is open."
-      : "Join the room to cast a W or L.";
 
-  // Results-visibility gate (mirrors the results route). The host, channel
-  // MODERATORs, and platform ADMINs always see counts to run the room.
+  // H20b: the host/mod check still gates mod tools + the danger zone (the
+  // results-visibility gate moved into the per-contest page).
   const isHostOrModerator =
     membership?.role === "HOST" ||
     membership?.role === "MODERATOR" ||
     Boolean(user && canManageChannel(user, channel));
-  const canSeeCounts =
-    channel.resultsVisibility === ResultsVisibility.LIVE ||
-    (channel.resultsVisibility === ResultsVisibility.AFTER_CLOSE &&
-      (votingClosed || effectiveCompleted)) ||
-    (channel.resultsVisibility === ResultsVisibility.HIDDEN && effectiveCompleted) ||
-    isHostOrModerator;
-  const countsHiddenLabel =
-    channel.resultsVisibility === ResultsVisibility.HIDDEN
-      ? "Results reveal when the host finalizes the room."
-      : "Results reveal when voting closes.";
 
-  // Freeze the final leaderboard by W% once the room is COMPLETED; otherwise
-  // keep the host's newest-first submission order.
-  const rankedSubmissions = effectiveCompleted
-    ? [...approvedSubmissions].sort((a, b) => {
-        const ratioOrder = compareWinRatio(b, a);
-        if (ratioOrder !== 0) return ratioOrder;
-        return b.winCount + b.lossCount - (a.winCount + a.lossCount);
-      })
-    : approvedSubmissions;
-
-  const champion =
-    effectiveCompleted && effectiveChampionId
-      ? approvedSubmissions.find(
-          (submission) => submission.id === effectiveChampionId,
-        )
-      : undefined;
-  const championSplit = champion ? getVoteSplit(champion) : null;
-
-  // H17 item 2: derive the top-3 podium from the latest completed leaderboard
-  // contest's rankingSnapshot when available. Fall back to ChampionBanner for
-  // legacy rooms without a contest record.
-  const submissionsById = new Map(
-    approvedSubmissions.map((submission) => [submission.id, submission]),
-  );
-  const rankingSnapshotEntries = parseRankingSnapshot(
-    latestContest?.rankingSnapshot ?? null,
-  );
-  const podiumEntries = rankingSnapshotEntries
-    .slice(0, 3)
-    .map((entry) => {
-      const submission = submissionsById.get(entry.submissionId);
-      if (!submission) return null;
-      return {
-        rank: entry.rank,
-        artistName: submission.artistName,
-        trackTitle: submission.trackTitle,
-        // rankingSnapshot stores a 0..1 fraction — multiply for display.
-        winPct: Math.round(entry.winPct * 100),
-        wins: entry.wins,
-        losses: entry.losses,
-      };
-    })
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
-
-  // H17 item 1: rankings entries — frozen from snapshot when the contest is
-  // completed, otherwise live from rankedSubmissions (already W%-sorted).
-  const liveLeaderboardEntries =
-    rankingSnapshotEntries.length > 0
-      ? rankingSnapshotEntries
-          .map((entry) => {
-            const submission = submissionsById.get(entry.submissionId);
-            if (!submission) return null;
-            return {
-              submissionId: entry.submissionId,
-              rank: entry.rank,
-              artistName: submission.artistName,
-              trackTitle: submission.trackTitle,
-              winPct: Math.round(entry.winPct * 100),
-              wins: entry.wins,
-              losses: entry.losses,
-            };
-          })
-          .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-      : rankedSubmissions.map((submission, index) => {
-          const split = getVoteSplit(submission);
-          return {
-            submissionId: submission.id,
-            rank: index + 1,
-            artistName: submission.artistName,
-            trackTitle: submission.trackTitle,
-            // getVoteSplit returns winPct as integer 0..100 already.
-            winPct: split.winPct,
-            wins: submission.winCount,
-            losses: submission.lossCount,
-          };
-        });
+  // H20b: every DRAFT/VOTING_OPEN contest is surfaced as its own card so the
+  // room becomes a venue with multiple concurrent rallies. Each card links
+  // into the per-contest page where voting + standings actually live.
+  const activeContests = await getActiveContestsForChannel(prisma, channel.id);
 
   // H17 item 4: per-mode all-time standings. Cheap — one query per mode —
   // and only completed contests count, so the rows are stable.
@@ -361,14 +227,6 @@ export default async function ChannelRoomPage({ params }: PageProps) {
   const battleStandingsRows = decorateStandings(battleStandings);
   const leaderboardStandingsRows = decorateStandings(leaderboardStandings);
 
-  const choices = new Map<string, "WIN" | "LOSS">();
-  for (const vote of ownVotes) {
-    if (!choices.has(vote.submissionId)) {
-      choices.set(vote.submissionId, vote.choice);
-    }
-  }
-  const turnstileSiteKey =
-    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() || undefined;
   const vapidPublicKey =
     process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY?.trim() || undefined;
 
@@ -439,35 +297,102 @@ export default async function ChannelRoomPage({ params }: PageProps) {
         </div>
       </section>
 
-      {effectiveCompleted && podiumEntries.length > 0 ? (
-        <div className="section-shell pt-6">
-          <PodiumTop3
-            entries={podiumEntries}
-            showCounts={canSeeCounts}
-            completedAt={effectiveCompletedAt}
-            heading="Podium"
-          />
+      {/*
+        H20b: the channel is a venue now — no single champion lives at the
+        top of the room. Contests carry their own podiums on their own pages.
+        Active contests get a card list; past contests appear in the Results
+        section further down via <PastContestsBrowser />.
+      */}
+      <div className="section-shell pt-8">
+        <div className="flex items-center gap-3">
+          <Sparkles className="size-5 text-primary-glow" aria-hidden="true" />
+          <h2 className="text-2xl font-bold text-foreground">
+            Active contests
+          </h2>
+          <span className="ml-auto font-mono text-xs text-muted-foreground">
+            {activeContests.length}{" "}
+            {activeContests.length === 1 ? "live" : "live"}
+          </span>
         </div>
-      ) : (
-        champion &&
-        championSplit && (
-          <div className="section-shell pt-6">
-            <ChampionBanner
-              artistName={champion.artistName}
-              trackTitle={champion.trackTitle}
-              winPct={championSplit.winPct}
-              total={championSplit.total}
-              completedAt={effectiveCompletedAt}
-            />
-          </div>
-        )
-      )}
 
-      {channel.votingClosesAt && (
-        <div className="section-shell pt-6">
-          <RoomBanner closesAt={channel.votingClosesAt.toISOString()} />
-        </div>
-      )}
+        {activeContests.length === 0 ? (
+          <p className="mt-4 rounded-xl border border-dashed border-border bg-elevated/60 p-5 leading-7 text-muted-foreground">
+            No live contests right now. The host can spin up a leaderboard or
+            battle from the dashboard — they all run side-by-side here.
+          </p>
+        ) : (
+          <ul className="mt-5 grid gap-4 sm:grid-cols-2">
+            {activeContests.map((contest) => {
+              const isBattle = contest.mode === ContestMode.BATTLE;
+              const ModeIcon = isBattle ? Swords : Trophy;
+              const modeLabel = isBattle ? "Battle" : "Leaderboard";
+              const statusLabel =
+                contest.status === "DRAFT" ? "Draft" : "Voting open";
+              return (
+                <li
+                  key={contest.id}
+                  className="flex flex-col gap-4 rounded-xl border border-border bg-elevated p-5"
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex min-h-7 items-center gap-1.5 rounded-full border px-2.5 font-mono text-[0.6875rem] font-bold tracking-[0.12em] uppercase ${
+                        isBattle
+                          ? "border-cyan/40 bg-cyan/10 text-cyan"
+                          : "border-primary-glow/40 bg-primary-glow/10 text-primary-glow"
+                      }`}
+                    >
+                      <ModeIcon className="size-3.5" aria-hidden="true" />
+                      {modeLabel}
+                    </span>
+                    <span className="font-mono text-sm font-bold text-foreground">
+                      #{contest.number}
+                    </span>
+                    <span className="ml-auto inline-flex min-h-7 items-center rounded-full border border-border bg-background px-2.5 font-mono text-[0.625rem] font-bold tracking-[0.12em] text-muted-foreground uppercase">
+                      {statusLabel}
+                    </span>
+                  </div>
+
+                  {contest.votingClosesAt && (
+                    <VotingCountdown
+                      closesAt={contest.votingClosesAt.toISOString()}
+                    />
+                  )}
+
+                  <dl className="grid grid-cols-2 gap-3 font-mono text-xs text-muted-foreground">
+                    <div>
+                      <dt className="font-bold tracking-[0.12em] uppercase">
+                        Tracks
+                      </dt>
+                      <dd className="mt-1 text-lg font-bold text-foreground">
+                        {contest.participantCount}
+                        {isBattle && contest.bracketSize
+                          ? ` / ${contest.bracketSize}`
+                          : ""}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="font-bold tracking-[0.12em] uppercase">
+                        Votes
+                      </dt>
+                      <dd className="mt-1 text-lg font-bold text-foreground">
+                        {contest.totalVotes}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <Link
+                    href={`/c/${channel.code}/contest/${contest.id}`}
+                    className={`${buttonVariants({ variant: "default", size: "sm" })} mt-auto`}
+                  >
+                    <Flag />
+                    Enter contest
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
 
       <div className="section-shell grid gap-8 py-10 lg:grid-cols-[minmax(0,1fr)_24rem] lg:py-14">
         <div>
@@ -500,129 +425,83 @@ export default async function ChannelRoomPage({ params }: PageProps) {
                 </span>
               </div>
 
-              {channel.votingClosesAt && (
-                <div className="mt-4">
-                  <VotingCountdown
-                    closesAt={channel.votingClosesAt.toISOString()}
-                  />
-                </div>
-              )}
-
               {approvedSubmissions.length === 0 ? (
                 <p className="mt-4 leading-7 text-muted-foreground">
                   No approved tracks yet. Once the host signs off, they drop here.
                 </p>
               ) : (
                 <ul className="mt-5 grid gap-4">
-                  {rankedSubmissions.map((submission, index) => {
-                    const isChampion =
-                      effectiveCompleted &&
-                      submission.id === effectiveChampionId;
-                    return (
-                      <li
-                        key={submission.id}
-                        className={`rounded-lg border bg-background p-4 ${
-                          isChampion
-                            ? "border-lime/50 shadow-glow-cyan"
-                            : "border-border"
-                        }`}
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="flex items-center gap-2 font-bold text-foreground">
-                            {effectiveCompleted && (
-                              <span className="font-mono text-xs text-muted-foreground">
-                                #{index + 1}
-                              </span>
-                            )}
-                            {submission.artistName} — {submission.trackTitle}
-                            {isChampion && (
-                              <span className="inline-flex items-center gap-1 rounded-full border border-lime/30 bg-lime/10 px-2 py-0.5 font-mono text-[0.625rem] font-bold tracking-[0.12em] text-lime uppercase">
-                                <Crown className="size-3" aria-hidden="true" />
-                                Champion
-                              </span>
-                            )}
-                          </p>
-                          <span className="font-mono text-[0.625rem] font-bold tracking-[0.12em] text-cyan uppercase">
-                            {submission.sourceType}
-                          </span>
-                        </div>
-                        {/* H13: Show uploader name */}
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          By {submission.submitterMember?.displayName ?? "Anonymous"}
+                  {/*
+                    H20b: voting moved off the roster — the per-track W/L
+                    pads and round controls now live inside each contest at
+                    /c/{code}/contest/{id}. The roster stays so members can
+                    see who's in the channel + preview the music.
+                  */}
+                  {approvedSubmissions.map((submission) => (
+                    <li
+                      key={submission.id}
+                      className="rounded-lg border border-border bg-background p-4"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-bold text-foreground">
+                          {submission.artistName} — {submission.trackTitle}
                         </p>
-                        {submission.description && (
-                          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-                            {submission.description}
-                          </p>
-                        )}
-                        <TrackPlayer
-                          sourceType={submission.sourceType}
-                          mediaAssetId={submission.mediaAssetId}
-                          externalUrl={submission.externalUrl}
-                          trackTitle={submission.trackTitle}
-                          artistName={submission.artistName}
-                          canPlayFile={
-                            // H14: FILE playback locked to host/ADMIN, mods, uploader
-                            Boolean(user && canManageChannel(user, channel)) ||
-                            membership?.role === "MODERATOR" ||
-                            (membership?.id ===
-                              submission.submitterMemberId)
-                          }
-                        />
-                        {/* H13: Track round controls */}
-                        {membership && (
-                          <TrackRoundControl
-                            submissionId={submission.id}
+                        <span className="font-mono text-[0.625rem] font-bold tracking-[0.12em] text-cyan uppercase">
+                          {submission.sourceType}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        By {submission.submitterMember?.displayName ?? "Anonymous"}
+                      </p>
+                      {submission.description && (
+                        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                          {submission.description}
+                        </p>
+                      )}
+                      <TrackPlayer
+                        sourceType={submission.sourceType}
+                        mediaAssetId={submission.mediaAssetId}
+                        externalUrl={submission.externalUrl}
+                        trackTitle={submission.trackTitle}
+                        artistName={submission.artistName}
+                        canPlayFile={
+                          // H14: FILE playback locked to host/ADMIN, mods, uploader
+                          Boolean(user && canManageChannel(user, channel)) ||
+                          membership?.role === "MODERATOR" ||
+                          (membership?.id === submission.submitterMemberId)
+                        }
+                      />
+                      {isHostOrModerator && (
+                        <div className="mt-3 flex justify-end border-t border-border pt-3">
+                          <DisqualifyTrackButton
                             channelId={channel.id}
-                            membership={membership}
-                            rounds={submission.trackVoteRounds}
-                            roundResultMode={submission.roundResultMode}
+                            submissionId={submission.id}
+                            artistName={submission.artistName}
+                            trackTitle={submission.trackTitle}
                           />
-                        )}
-                        <VoteControl
-                          code={channel.code}
-                          submissionId={submission.id}
-                          initialWinCount={submission.winCount}
-                          initialLossCount={submission.lossCount}
-                          initialChoice={choices.get(submission.id)}
-                          canVote={canVote}
-                          disabledReason={voteDisabledReason}
-                          turnstileSiteKey={turnstileSiteKey}
-                          showCounts={canSeeCounts}
-                          countsHiddenLabel={
-                            canSeeCounts ? undefined : countsHiddenLabel
-                          }
-                        />
-                        {isHostOrModerator && (
-                          <div className="mt-3 flex justify-end border-t border-border pt-3">
-                            <DisqualifyTrackButton
-                              channelId={channel.id}
-                              submissionId={submission.id}
-                              artistName={submission.artistName}
-                              trackTitle={submission.trackTitle}
-                            />
-                          </div>
-                        )}
-                      </li>
-                    );
-                  })}
+                        </div>
+                      )}
+                    </li>
+                  ))}
                 </ul>
               )}
             </section>
 
             <section className="rounded-xl border border-border bg-elevated p-6 space-y-6">
               <div className="flex items-center gap-3">
-                <Crown
+                <Trophy
                   className="size-6 text-primary-glow"
                   aria-hidden="true"
                 />
-                <h3 className="text-lg font-bold text-foreground">Results</h3>
+                <h3 className="text-lg font-bold text-foreground">
+                  Past contests &amp; standings
+                </h3>
               </div>
-              <LeaderboardRankings
-                entries={liveLeaderboardEntries}
-                canSeeCounts={canSeeCounts}
-                countsHiddenLabel={countsHiddenLabel}
-              />
+              {/*
+                H20b: live leaderboard rankings live on each contest page
+                now. The room only surfaces frozen, completed contests +
+                cross-contest standings.
+              */}
               <PastContestsBrowser channelKey={channel.code} />
               <div className="grid gap-6 lg:grid-cols-2">
                 <ModeStandingsTable

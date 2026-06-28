@@ -18,13 +18,17 @@ type OpenRound = {
 
 type ChannelBattleRoundCloseControlProps = {
   channelId: string;
-  status: string;
+  /**
+   * H20b: kept for back-compat with the dashboard mount; no longer gates the
+   * control. `openRound` is the real signal — if a battle round is voting-open
+   * it can be closed regardless of the (now-decoupled) channel status.
+   */
+  status?: string;
   openRound: OpenRound | null;
 };
 
 export function ChannelBattleRoundCloseControl({
   channelId,
-  status,
   openRound,
 }: ChannelBattleRoundCloseControlProps) {
   const router = useRouter();
@@ -37,8 +41,6 @@ export function ChannelBattleRoundCloseControl({
     if (!openRound) return [];
     return openRound.matchups.filter((matchup) => tiedMatchupIds.includes(matchup.id));
   }, [openRound, tiedMatchupIds]);
-
-  const isBattle = status === "BATTLE";
 
   async function closeRound() {
     if (!openRound || pending) return;
@@ -85,14 +87,6 @@ export function ChannelBattleRoundCloseControl({
     } finally {
       setPending(false);
     }
-  }
-
-  if (!isBattle) {
-    return (
-      <p className="text-sm leading-6 text-muted-foreground">
-        Close rounds once the room enters battle mode.
-      </p>
-    );
   }
 
   if (!openRound) {

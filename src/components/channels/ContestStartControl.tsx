@@ -10,18 +10,19 @@ import { Button } from "@/components/ui/button";
 // Battle brackets keep their own existing control (ChannelBattleCreateControl)
 // so the host UX stays distinct, but both endpoints route through
 // POST /api/channels/[channel]/contests.
+// H20b: dropped the `hasActiveContest` "finalize first" gate — H20a allows
+// unlimited concurrent contests, so this control no longer needs to know
+// whether another contest is already running.
 type ContestStartControlProps = {
   channelId: string;
   status: string;
   approvedCount: number;
-  hasActiveContest: boolean;
 };
 
 export function ContestStartControl({
   channelId,
   status,
   approvedCount,
-  hasActiveContest,
 }: ContestStartControlProps) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -29,7 +30,7 @@ export function ContestStartControl({
   const [info, setInfo] = useState("");
 
   const isOpen = status === "OPEN";
-  const canStart = isOpen && !hasActiveContest && approvedCount > 0 && !pending;
+  const canStart = isOpen && approvedCount > 0 && !pending;
 
   async function startLeaderboard() {
     if (pending) return;
@@ -76,19 +77,13 @@ export function ContestStartControl({
         Start leaderboard contest
       </Button>
 
-      {hasActiveContest && (
-        <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          A contest is already running. Finalize it before starting another.
-        </p>
-      )}
-
-      {!hasActiveContest && !isOpen && (
+      {!isOpen && (
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
           Contests can only start while the room is open.
         </p>
       )}
 
-      {!hasActiveContest && isOpen && approvedCount === 0 && (
+      {isOpen && approvedCount === 0 && (
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
           Approve at least one track before starting a contest.
         </p>

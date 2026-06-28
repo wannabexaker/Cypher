@@ -89,7 +89,9 @@ export type BattleState = {
 export async function getBattleState(
   channelId: string,
   ownVoteFilter?: OwnVoteFilter,
+  options?: { contestId?: string },
 ): Promise<BattleState> {
+  const contestId = options?.contestId;
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
     select: {
@@ -98,6 +100,7 @@ export async function getBattleState(
       championSubmissionId: true,
       completedAt: true,
       battleRounds: {
+        where: contestId ? { contestId } : undefined,
         orderBy: { roundNumber: "asc" },
         select: {
           id: true,
@@ -126,13 +129,22 @@ export async function getBattleState(
     round.matchups.map((matchup) => matchup.id),
   );
 
-  // H16b: the canonical bracket champion now lives on the latest COMPLETED
-  // BATTLE contest. Channel fields stay as a fallback for pre-H16b data.
-  const latestContest = await getLatestCompletedContest(
-    prisma,
-    channelId,
-    ContestMode.BATTLE,
-  );
+  // H20b: when scoped to a specific contest, the champion + completedAt come
+  // from that contest. Without a contestId we fall back to "latest COMPLETED
+  // BATTLE contest" (H16b) and the legacy channel mirror.
+  const scopedContest = contestId
+    ? await prisma.contest.findUnique({
+        where: { id: contestId },
+        select: { championSubmissionId: true, completedAt: true },
+      })
+    : null;
+  const latestContest = contestId
+    ? null
+    : await getLatestCompletedContest(
+        prisma,
+        channelId,
+        ContestMode.BATTLE,
+      );
 
   const [grouped, ownVotes] = await Promise.all([
     matchupIds.length === 0
@@ -143,6 +155,7 @@ export async function getBattleState(
             channelId,
             isValid: true,
             matchupId: { in: matchupIds },
+            ...(contestId ? { contestId } : {}),
           },
           _count: { _all: true },
         }),
@@ -152,6 +165,7 @@ export async function getBattleState(
             channelId,
             isValid: true,
             matchupId: { in: matchupIds },
+            ...(contestId ? { contestId } : {}),
             ...ownVoteFilter,
           },
           orderBy: { createdAt: "desc" },
@@ -176,8 +190,13 @@ export async function getBattleState(
     channelId: channel.id,
     status: channel.status,
     championSubmissionId:
-      latestContest?.championSubmissionId ?? channel.championSubmissionId,
-    completedAt: latestContest?.completedAt ?? channel.completedAt,
+      scopedContest?.championSubmissionId ??
+      latestContest?.championSubmissionId ??
+      channel.championSubmissionId,
+    completedAt:
+      scopedContest?.completedAt ??
+      latestContest?.completedAt ??
+      channel.completedAt,
     rounds: channel.battleRounds.map((round) => ({
       id: round.id,
       roundNumber: round.roundNumber,

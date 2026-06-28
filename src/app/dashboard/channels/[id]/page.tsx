@@ -13,7 +13,6 @@ import {
   Radio,
   Sparkles,
   Swords,
-  Timer,
   Trash2,
   UserCog,
   Users,
@@ -25,7 +24,6 @@ import { ChannelDeleteControl } from "@/components/channels/ChannelDeleteControl
 import { ChannelFinalizeControl } from "@/components/channels/ChannelFinalizeControl";
 import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { ChannelStatusControl } from "@/components/channels/ChannelStatusControl";
-import { ChannelTimerControl } from "@/components/channels/ChannelTimerControl";
 import { ChannelTransferControl } from "@/components/channels/ChannelTransferControl";
 import { ContestStartControl } from "@/components/channels/ContestStartControl";
 import { CopyButton } from "@/components/channels/CopyButton";
@@ -154,15 +152,13 @@ export default async function ManageChannelPage({ params }: PageProps) {
   // H16b: contest lifecycle. Active contest gates the host controls; the
   // latest COMPLETED LEADERBOARD contest is the source of truth for the
   // champion banner now that channels stay OPEN as venues.
-  const [activeLeaderboardContest, activeBattleContest, latestLeaderboardContest] =
+  // H20b: dropped `hasActiveContest` derivation — concurrent contests are
+  // allowed, so ContestStartControl no longer needs to know about it.
+  const [activeLeaderboardContest, latestLeaderboardContest] =
     await Promise.all([
       getActiveContest(prisma, channel.id, ContestMode.LEADERBOARD),
-      getActiveContest(prisma, channel.id, ContestMode.BATTLE),
       getLatestCompletedContest(prisma, channel.id, ContestMode.LEADERBOARD),
     ]);
-  const hasActiveContest = Boolean(
-    activeLeaderboardContest || activeBattleContest,
-  );
   const effectiveChampionId =
     latestLeaderboardContest?.championSubmissionId ??
     channel.championSubmissionId ??
@@ -344,26 +340,6 @@ export default async function ManageChannelPage({ params }: PageProps) {
         <div className="space-y-6">
           <section className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-7">
             <div className="flex items-center gap-3">
-              <Timer className="size-5 text-cyan" />
-              <h2 className="text-2xl font-bold text-foreground">
-                Voting timer
-              </h2>
-            </div>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Arm a deadline to auto-lock voting. Extend to push it later, or
-              close the window now. No timer keeps voting open indefinitely.
-            </p>
-            <div className="mt-6">
-              <ChannelTimerControl
-                channelId={channel.id}
-                status={channel.status}
-                closesAt={channel.votingClosesAt?.toISOString() ?? null}
-              />
-            </div>
-          </section>
-
-          <section className="rounded-xl border border-border bg-elevated p-5 shadow-panel sm:p-7">
-            <div className="flex items-center gap-3">
               <Sparkles className="size-5 text-primary-glow" />
               <h2 className="text-2xl font-bold text-foreground">
                 Start contest
@@ -379,7 +355,6 @@ export default async function ManageChannelPage({ params }: PageProps) {
                 channelId={channel.id}
                 status={channel.status}
                 approvedCount={approvedCount}
-                hasActiveContest={hasActiveContest}
               />
             </div>
           </section>
@@ -446,7 +421,9 @@ export default async function ManageChannelPage({ params }: PageProps) {
                 </div>
               )}
 
-              {channel.status === "BATTLE" && (
+              {/* H20b: channel.status never goes BATTLE anymore — gate the
+                  close-round control on an actually open battle round. */}
+              {openBattleRound && (
                 <div>
                   <p className="font-mono text-[0.6875rem] font-bold tracking-[0.14em] text-muted-foreground uppercase">
                     Close round
@@ -454,22 +431,21 @@ export default async function ManageChannelPage({ params }: PageProps) {
                   <div className="mt-3">
                     <ChannelBattleRoundCloseControl
                       channelId={channel.id}
-                      status={channel.status}
                       openRound={openBattleRound}
                     />
                   </div>
                 </div>
               )}
 
-              {(channel.status === "BATTLE" || channel.status === "COMPLETED") && (
-                <Link
-                  href={`/c/${channel.code}/battle`}
-                  className={buttonVariants({ variant: "outline", size: "sm" })}
-                >
-                  <Flag />
-                  Open battle board
-                </Link>
-              )}
+              {/* H20b: the battle page is now a thin redirect to the latest
+                  battle contest, so always offer the link from the dashboard. */}
+              <Link
+                href={`/c/${channel.code}/battle`}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                <Flag />
+                Open battle board
+              </Link>
             </div>
           </section>
 

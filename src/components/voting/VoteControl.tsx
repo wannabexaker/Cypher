@@ -47,10 +47,12 @@ type VoteControlProps = {
   countsHiddenLabel?: string;
   votePath?: string;
   extraPayload?: Record<string, string>;
+  contestId?: string;
 };
 
 type VoteResponse = {
   error?: string;
+  code?: string;
   winCount?: number;
   lossCount?: number;
   yourChoice?: VoteChoice;
@@ -70,6 +72,7 @@ export function VoteControl({
   countsHiddenLabel,
   votePath,
   extraPayload,
+  contestId,
 }: VoteControlProps) {
   const reduceMotion = useReducedMotion();
   const [winCount, setWinCount] = useState(initialWinCount);
@@ -141,6 +144,7 @@ export function VoteControl({
         body: JSON.stringify({
           submissionId,
           choice: nextChoice,
+          ...(contestId ? { contestId } : {}),
           ...(extraPayload ?? {}),
           ...(turnstileToken ? { turnstileToken } : {}),
         }),
@@ -153,6 +157,15 @@ export function VoteControl({
         payload.lossCount === undefined ||
         !payload.yourChoice
       ) {
+        // H20b: surface the "pick a contest" prompt explicitly so the user
+        // doesn't get the generic error text when the room has multiple
+        // active leaderboard contests and the caller didn't pass a contestId.
+        if (payload.code === "CONTEST_REQUIRED") {
+          setMessage(
+            "Open a specific contest to vote — multiple contests are running here.",
+          );
+          return;
+        }
         setMessage(payload.error ?? "Unable to record your vote.");
         return;
       }
