@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-// H17 item 3: client browser for completed (and active) contests in a room.
-// Hits GET /api/channels/:code/contests on mount. Selecting an item expands
-// to show its frozen detail — currently the champion line + W/L/contest meta;
-// rich snapshot/bracket views are part of follow-ups that hydrate from
-// dedicated detail routes.
+// H17 item 3: client browser for *past* (COMPLETED) contests in a room.
+// Hits GET /api/channels/:code/contests on mount, then filters to COMPLETED
+// only — active (DRAFT/VOTING_OPEN) contests are surfaced separately by the
+// room/dashboard "Active contests" cards. Selecting an item expands to show
+// its frozen champion line; rich snapshot/bracket views hydrate from
+// dedicated detail routes in follow-ups.
 
-type ContestListItem = {
+type ApiContestItem = {
   id: string;
   mode: "BATTLE" | "LEADERBOARD";
   status: "DRAFT" | "VOTING_OPEN" | "COMPLETED";
@@ -17,6 +18,10 @@ type ContestListItem = {
   completedAt: string | null;
   championSubmissionId: string | null;
   championTitle: string | null;
+};
+
+type ContestListItem = Omit<ApiContestItem, "status"> & {
+  status: "COMPLETED";
 };
 
 type Props = {
@@ -38,8 +43,16 @@ export function PastContestsBrowser({ channelKey }: Props) {
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
-        const data = (await response.json()) as { contests: ContestListItem[] };
-        if (!cancelled) setItems(data.contests);
+        const data = (await response.json()) as { contests: ApiContestItem[] };
+        if (!cancelled) {
+          // H23 P2.2: filter to COMPLETED so VOTING_OPEN/DRAFT contests can't
+          // leak into "Past contests" — those are surfaced by the room +
+          // dashboard "Active contests" cards instead.
+          const completed = data.contests.filter(
+            (item): item is ContestListItem => item.status === "COMPLETED",
+          );
+          setItems(completed);
+        }
       })
       .catch((reason) => {
         if (cancelled) return;
@@ -58,10 +71,11 @@ export function PastContestsBrowser({ channelKey }: Props) {
 
   return (
     <section className="space-y-3">
-      <h3 className="font-mono text-xs font-bold tracking-[0.18em] text-muted-foreground uppercase">
-        Past contests
-      </h3>
-
+      {/*
+        H23 P3.5: the inner "Past contests" heading is gone — both call
+        sites (dashboard channel page + room) already render their own
+        outer label, so this would duplicate it.
+      */}
       {error ? (
         <p className="font-mono text-xs text-amber-300">{error}</p>
       ) : items === null ? (
@@ -122,9 +136,7 @@ export function PastContestsBrowser({ channelKey }: Props) {
                       </p>
                     ) : (
                       <p className="font-mono text-xs text-muted-foreground">
-                        {selected.status === "COMPLETED"
-                          ? "No champion recorded."
-                          : "Results will appear once this contest finalizes."}
+                        No champion recorded.
                       </p>
                     )}
                   </div>

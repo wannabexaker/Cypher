@@ -137,14 +137,34 @@ export function TrackPlayer({
         {providerLabel}
       </div>
       {isYouTube ? (
-        <div className="relative w-full" style={{ aspectRatio: "16 / 9" }}>
+        /*
+          H23 P2.4: YouTube embed kept appearing as a blank gray box while
+          Spotify/SoundCloud played fine. Two changes vs the original 16:9
+          wrapper:
+            1. Switch from inline `aspectRatio` to the classic
+               `padding-bottom: 56.25%` responsive trick. The aspect-ratio
+               CSS property can race with `loading="lazy"` — the iframe is
+               measured as 0×0 before the property resolves, so the lazy
+               loader can skip it.
+            2. Drop `loading="lazy"` on the YouTube branch (Spotify keeps
+               it because it uses a fixed pixel height) and add
+               `referrerPolicy="origin-when-cross-origin"` so the YT player
+               can phone home for the videos that require a non-empty
+               referer to play.
+          The sandbox/allow list is unchanged — it already permits the
+          player to run.
+        */
+        <div
+          className="relative w-full"
+          style={{ paddingBottom: "56.25%" }}
+        >
           <iframe
             title={title}
             src={embedUrl}
-            loading="lazy"
             sandbox={IFRAME_SANDBOX}
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture; web-share"
             allowFullScreen
+            referrerPolicy="origin-when-cross-origin"
             className="absolute inset-0 h-full w-full"
             style={{ border: 0 }}
           />
