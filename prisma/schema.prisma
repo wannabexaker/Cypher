@@ -376,7 +376,7 @@ model MediaAsset {
 // dedupeKey is computed app-side, namespaced; its UNIQUE is the final anti-double-vote guard:
 //   PER_SUBMISSION : "ch:{channelId}:s:{submissionId}:{identity}"
 //   PER_COMPETITION: "ch:{channelId}:{identity}"
-//   battle matchup : "m:{matchupId}:{identity}"
+//   battle track   : "m:{matchupId}:s:{submissionId}:{identity}"
 // identity = "u:{userId}" if logged-in, else "f:{fingerprintHash}".
 // IP stays OUT of the unique (rate cap only) — NAT/mobile share IPs.
 // ─────────────────────────────────────────────────────────────────────────────

@@ -158,14 +158,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
       fingerprint: parsed.data.fingerprint,
       turnstileToken: parsed.data.turnstileToken,
       contestId: activeContest.id,
-      // H22 fix #4: previously the dedupe key included `:s:${submissionId}`
-      // so one identity could vote for BOTH sides of the same matchup (the
-      // submission id made each side a distinct key). Make it matchup-scoped
-      // so the unique constraint in `Vote.dedupeKey` enforces "one vote per
-      // identity per matchup" — flipping sides now hits the `locked` path in
-      // cast-wl-vote and returns the original choice.
+      // Battle verdicts are W/L per track, so the two sides of a matchup need
+      // independent dedupe keys. The submission segment still guarantees one
+      // immutable vote per identity for each track.
       dedupeKeyForIdentity: (identityKey) =>
+        `m:${matchup.id}:s:${parsed.data.submissionId}:${identityKey}`,
+      legacyDedupeKeysForIdentity: (identityKey) => [
         `m:${matchup.id}:${identityKey}`,
+      ],
       tallyWhere: { matchupId: matchup.id },
     });
 
