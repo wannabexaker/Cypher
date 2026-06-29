@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://cypher:cypher@localhost:5432/cypher?schema=public
+  DIRECT_URL: postgresql://cypher:cypher@localhost:5432/cypher?schema=public
+  AUTH_GOOGLE_ID: ""
+  AUTH_GOOGLE_SECRET: ""
+  TURNSTILE_SECRET_KEY: ""
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: ""
+  VOTE_IP_CAP: "1000"
+  S3_ENDPOINT: http://localhost:9000
+  S3_REGION: auto
+  S3_BUCKET: cypher-media
+  S3_ACCESS_KEY_ID: minioadmin
+  S3_SECRET_ACCESS_KEY: minioadmin
+  S3_FORCE_PATH_STYLE: "true"
+  VAPID_PUBLIC_KEY: ""
+  VAPID_PRIVATE_KEY: ""
+  NEXT_PUBLIC_VAPID_PUBLIC_KEY: ""
+  CI: "true"
+
+jobs:
+  verify:
+    name: Validate, test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Create ephemeral auth secret
+        run: echo "AUTH_SECRET=$(openssl rand -base64 33)" >> "$GITHUB_ENV"
+
+      - name: Validate Prisma schema
+        run: pnpm prisma validate
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Run unit tests with coverage
+        run: pnpm test:coverage
+
+      - name: Start PostgreSQL and MinIO
+        run: docker compose up -d postgres minio createbuckets
+
+      - name: Wait for test services
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            if docker compose exec -T postgres pg_isready -U cypher -d cypher \
+              && curl --fail --silent http://localhost:9000/minio/health/live > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs postgres minio createbuckets
+          exit 1
+
+      - name: Apply database migrations
+        run: pnpm prisma migrate deploy
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run API and browser tests
+        run: pnpm test:playwright
+
+      - name: Build production application
+        run: pnpm build
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: .artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Stop test services
+        if: always()
+        run: docker compose down --volumes

@@ -87,6 +87,38 @@ pnpm build && pnpm start
 
 Other scripts: `pnpm typecheck`, `pnpm lint`, `pnpm db:studio`.
 
+## Testing
+
+The automated suite covers validation and vote calculations, embed URL
+hardening, API authorization and security headers, concurrent battle vote
+scoping, the complete host registration/room flow, guest W/L voting, contest
+timer banners, and a mobile landing-page smoke test.
+
+For the database-backed API and browser tests, copy the isolated test env and
+make sure its database/MinIO ports match your Docker Compose setup:
+
+```bash
+cp .env.e2e.example .env.e2e
+docker compose up -d
+pnpm prisma migrate deploy
+pnpm exec playwright install chromium
+```
+
+Run individual gates or the complete suite:
+
+```bash
+pnpm test:unit       # fast Vitest suite
+pnpm test:coverage   # Vitest plus enforced coverage thresholds
+pnpm test:api        # Playwright API integration tests
+pnpm test:e2e        # desktop and mobile browser journeys
+pnpm test            # unit plus all Playwright projects
+```
+
+Playwright creates uniquely named `e2e_*@example.test` fixtures and removes
+them after each journey. Failure screenshots, traces, videos, and the HTML
+report are written under `.artifacts/` and are not committed. CI runs the same
+gates against fresh PostgreSQL and MinIO services before the production build.
+
 ## Project Structure
 
 ```
