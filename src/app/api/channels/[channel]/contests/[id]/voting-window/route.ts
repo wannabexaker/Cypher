@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { canModerateChannel, resolveChannelByParam } from "@/lib/channels";
 import { prisma } from "@/lib/prisma";
+import { sendChannelPush } from "@/lib/push";
 import { getCurrentUser } from "@/lib/session";
 import { contestTimerSchema } from "@/lib/validation/timer";
 
@@ -52,6 +53,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const channel = await resolveChannelByParam(prisma, channelId, {
     id: true,
     hostId: true,
+    code: true,
+    name: true,
   });
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
@@ -68,6 +71,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
     where: { id: contestId, channelId: channel.id },
     select: {
       id: true,
+      mode: true,
+      number: true,
       status: true,
       votingClosesAt: true,
     },
@@ -122,6 +127,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
 
     return next;
+  });
+
+  const contestLabel = `${contest.mode === "BATTLE" ? "Battle" : "Leaderboard"}${contest.number ? ` #${contest.number}` : ""}`;
+  const closed = input.action === "close";
+  await sendChannelPush(channel.id, {
+    title: `${channel.name}: voting ${closed ? "closed" : "open"}`,
+    body: closed
+      ? `${contestLabel} is no longer accepting votes.`
+      : input.action === "extend"
+        ? `${contestLabel} voting was extended.`
+        : `${contestLabel} is now accepting votes.`,
+    url: `/c/${channel.code}/contest/${contest.id}`,
+    tag: `cypher-contest-voting-${contest.id}`,
   });
 
   return NextResponse.json({

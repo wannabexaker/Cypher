@@ -16,10 +16,10 @@ import { ChannelStatusBadge } from "@/components/channels/ChannelStatusBadge";
 import { ContestTimerControl } from "@/components/contests/ContestTimerControl";
 import { LeaderboardRankings } from "@/components/contests/LeaderboardRankings";
 import { PodiumTop3 } from "@/components/contests/PodiumTop3";
+import { RoomBanner } from "@/components/notifications/RoomBanner";
 import { TrackPlayer } from "@/components/submissions/TrackPlayer";
 import { buttonVariants } from "@/components/ui/button";
 import { VoteControl } from "@/components/voting/VoteControl";
-import { VotingCountdown } from "@/components/voting/VotingCountdown";
 import { getBattleState } from "@/lib/battles";
 import { canManageChannel } from "@/lib/channels";
 import { parseRankingSnapshot } from "@/lib/contests";
@@ -193,11 +193,10 @@ export default async function ContestRoomPage({ params }: PageProps) {
             : ""}
         </p>
         {contest.votingClosesAt && (
-          <div className="mt-4">
-            <VotingCountdown
-              closesAt={contest.votingClosesAt.toISOString()}
-            />
-          </div>
+          <RoomBanner
+            closesAt={contest.votingClosesAt.toISOString()}
+            className="mt-4"
+          />
         )}
       </section>
 

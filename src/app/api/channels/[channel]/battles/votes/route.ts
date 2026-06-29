@@ -1,5 +1,6 @@
 import {
   ContestMode,
+  ContestStatus,
   MatchupStatus,
   RoundStatus,
 } from "@prisma/client";
@@ -10,7 +11,7 @@ import {
   VoteIpCapError,
   VoteTurnstileError,
 } from "@/lib/cast-wl-vote";
-import { bumpChannelActivity, getActiveContest } from "@/lib/contests";
+import { bumpChannelActivity } from "@/lib/contests";
 import {
   findChannelMembership,
   resolveChannelIdentity,
@@ -90,6 +91,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
         select: {
           channelId: true,
           status: true,
+          contest: {
+            select: {
+              id: true,
+              mode: true,
+              status: true,
+              votingClosesAt: true,
+            },
+          },
         },
       },
     },
@@ -119,27 +128,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   try {
-    // H16a/H16b: every matchup vote belongs to an active BATTLE contest.
-    // 409 if none. H20a: also enforce the contest's per-contest voting
-    // window — battle contests can now arm their own deadline.
-    const activeContest = await getActiveContest(
-      prisma,
-      channel.id,
-      ContestMode.BATTLE,
-    );
-    if (!activeContest) {
+    // The matchup's round owns the contest. Never infer the target from the
+    // newest active battle: multiple battle contests may run concurrently.
+    const contest = matchup.round.contest;
+    if (
+      !contest ||
+      contest.mode !== ContestMode.BATTLE ||
+      contest.status !== ContestStatus.VOTING_OPEN
+    ) {
       return NextResponse.json(
-        { error: "No active battle contest." },
+        { error: "This battle contest is not accepting votes." },
         { status: 409 },
       );
     }
-    const contestWindow = await prisma.contest.findUnique({
-      where: { id: activeContest.id },
-      select: { votingClosesAt: true },
-    });
     if (
-      contestWindow?.votingClosesAt &&
-      Date.now() >= contestWindow.votingClosesAt.getTime()
+      contest.votingClosesAt &&
+      Date.now() >= contest.votingClosesAt.getTime()
     ) {
       return NextResponse.json(
         { error: "Voting has closed for this contest." },
@@ -157,7 +161,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       choice: parsed.data.choice,
       fingerprint: parsed.data.fingerprint,
       turnstileToken: parsed.data.turnstileToken,
-      contestId: activeContest.id,
+      contestId: contest.id,
       // Battle verdicts are W/L per track, so the two sides of a matchup need
       // independent dedupe keys. The submission segment still guarantees one
       // immutable vote per identity for each track.

@@ -66,7 +66,7 @@ export function RoomBanner({ closesAt, className }: RoomBannerProps) {
       <Megaphone className="size-4 shrink-0" aria-hidden="true" />
       <p className="min-w-0 flex-1" suppressHydrationWarning>
         {closed ? (
-          "Voting has closed for this room."
+          "Voting has closed for this contest."
         ) : (
           <>
             Voting is open — closes in{" "}
