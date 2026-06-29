@@ -6,6 +6,7 @@ import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { getBrowserFingerprint } from "@/lib/fingerprint";
 import { cn } from "@/lib/utils";
 import { getVoteSplit } from "@/lib/votes";
 
@@ -48,6 +49,7 @@ type VoteControlProps = {
   votePath?: string;
   extraPayload?: Record<string, string>;
   contestId?: string;
+  fingerprintRequired?: boolean;
 };
 
 type VoteResponse = {
@@ -73,6 +75,7 @@ export function VoteControl({
   votePath,
   extraPayload,
   contestId,
+  fingerprintRequired = false,
 }: VoteControlProps) {
   const reduceMotion = useReducedMotion();
   const [winCount, setWinCount] = useState(initialWinCount);
@@ -90,12 +93,34 @@ export function VoteControl({
       : "",
   );
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [fingerprint, setFingerprint] = useState("");
+  const [fingerprintFailed, setFingerprintFailed] = useState(false);
   const turnstileContainerRef = useRef<HTMLDivElement>(null);
   const turnstileWidgetRef = useRef<string | null>(null);
 
   const { total, winPct, lossPct } = getVoteSplit({ winCount, lossCount });
   const needsTurnstile = Boolean(turnstileSiteKey);
   const voteLocked = Boolean(choice);
+  const needsFingerprint = fingerprintRequired && canVote && !voteLocked;
+
+  useEffect(() => {
+    if (!needsFingerprint) return;
+
+    let active = true;
+    setFingerprintFailed(false);
+
+    void getBrowserFingerprint()
+      .then((visitorId) => {
+        if (active) setFingerprint(visitorId);
+      })
+      .catch(() => {
+        if (active) setFingerprintFailed(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [needsFingerprint]);
 
   function renderTurnstile() {
     if (
@@ -138,6 +163,7 @@ export function VoteControl({
       !canVote ||
       pending ||
       voteLocked ||
+      (needsFingerprint && !fingerprint) ||
       (needsTurnstile && !turnstileToken)
     ) {
       return;
@@ -155,6 +181,7 @@ export function VoteControl({
           choice: nextChoice,
           ...(contestId ? { contestId } : {}),
           ...(extraPayload ?? {}),
+          ...(fingerprint ? { fingerprint } : {}),
           ...(turnstileToken ? { turnstileToken } : {}),
         }),
       });
@@ -263,6 +290,7 @@ export function VoteControl({
             !canVote ||
             pending ||
             voteLocked ||
+            (needsFingerprint && !fingerprint) ||
             (needsTurnstile && !turnstileToken)
           }
           onClick={() => void cast("WIN")}
@@ -282,6 +310,7 @@ export function VoteControl({
             !canVote ||
             pending ||
             voteLocked ||
+            (needsFingerprint && !fingerprint) ||
             (needsTurnstile && !turnstileToken)
           }
           onClick={() => void cast("LOSS")}
@@ -289,6 +318,23 @@ export function VoteControl({
           {pending ? <LoaderCircle className="motion-safe:animate-spin" /> : "L"}
         </Button>
       </div>
+
+      {needsFingerprint && (
+        <p
+          role="status"
+          className={cn(
+            "mt-3 inline-flex items-center gap-2 text-xs",
+            fingerprintFailed ? "text-magenta" : "text-muted-foreground",
+          )}
+        >
+          <ShieldCheck className="size-3.5 text-cyan" aria-hidden="true" />
+          {fingerprintFailed
+            ? "Device check unavailable. Refresh or sign in to vote."
+            : fingerprint
+              ? "Device check ready."
+              : "Checking this device..."}
+        </p>
+      )}
 
       {turnstileSiteKey && canVote && (
         <>

@@ -23,6 +23,7 @@ test("battle votes remain scoped to their matchup contest", async ({
         matchupId: fixture.olderBattle.matchup.id,
         submissionId: fixture.submissions[0].id,
         choice: "WIN",
+        fingerprint: "battle-device-a",
       },
     });
     expect(winResponse.status()).toBe(201);
@@ -40,6 +41,7 @@ test("battle votes remain scoped to their matchup contest", async ({
         matchupId: fixture.olderBattle.matchup.id,
         submissionId: fixture.submissions[1].id,
         choice: "LOSS",
+        fingerprint: "battle-device-a",
       },
     });
     expect(lossResponse.status()).toBe(201);
@@ -57,6 +59,7 @@ test("battle votes remain scoped to their matchup contest", async ({
         matchupId: fixture.olderBattle.matchup.id,
         submissionId: fixture.submissions[0].id,
         choice: "LOSS",
+        fingerprint: "battle-device-b",
       },
     });
     expect(lockedResponse.status()).toBe(200);

@@ -5,15 +5,33 @@ type TurnstileResponse = {
   success?: boolean;
 };
 
+type TurnstileEnvironment = {
+  NODE_ENV?: string;
+  TURNSTILE_SECRET_KEY?: string;
+};
+
+export function getTurnstileConfiguration(
+  environment: TurnstileEnvironment = process.env,
+) {
+  const secret = environment.TURNSTILE_SECRET_KEY?.trim() ?? "";
+  return {
+    secret,
+    required: environment.NODE_ENV === "production" || Boolean(secret),
+  };
+}
+
 export async function verifyTurnstile({
   token,
   remoteIp,
+  environment,
 }: {
   token?: string;
   remoteIp?: string;
+  environment?: TurnstileEnvironment;
 }) {
-  const secret = process.env.TURNSTILE_SECRET_KEY?.trim();
-  if (!secret) return true;
+  const configuration = getTurnstileConfiguration(environment);
+  const { secret } = configuration;
+  if (!secret) return !configuration.required;
   if (!token) return false;
 
   const body = new URLSearchParams({

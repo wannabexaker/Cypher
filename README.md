@@ -4,7 +4,7 @@ Online rap/trap music competitions and battles where the crowd decides the winne
 
 ## Overview
 
-Cypher runs music competitions as rooms ("channels"). A host opens a channel and shares a join code; artists drop tracks, the crowd votes win/loss on each track, and the host either crowns the highest-rated track or runs a single-elimination battle bracket to a champion. Voting is open to guests, so the vote path is built around anti-fraud (hashed IP and fingerprint, a database-enforced dedupe key, a per-IP cap, and optional captcha) rather than requiring accounts. PostgreSQL is the source of truth for votes; object storage holds the audio.
+Cypher runs music competitions as rooms ("channels"). A host opens a channel and shares a join code; artists drop tracks, the crowd votes win/loss on each track, and the host either crowns the highest-rated track or runs a single-elimination battle bracket to a champion. Voting is open to guests, so the vote path is built around anti-fraud (signed membership identity, hashed IP and fingerprint signals, a database-enforced dedupe key, a per-IP cap, and optional captcha) rather than requiring accounts. PostgreSQL is the source of truth for votes; object storage holds the audio.
 
 ## Features
 
@@ -12,7 +12,8 @@ Cypher runs music competitions as rooms ("channels"). A host opens a channel and
 - Participation roles per channel: Artist (submits a track), Judge (votes), plus host-granted Moderators
 - Audio submissions by presigned upload (MP3/WAV, verified by magic bytes) or SoundCloud/Spotify embed, with host approve/reject moderation
 - Win/Loss voting per track with a live W%/L% split; one vote per identity per track, changeable until voting closes
-- Anti-fraud vote pipeline: HMAC-hashed IP and fingerprint, a unique `dedupeKey` enforced by the database, a per-IP cap, optional Cloudflare Turnstile, and a serializable write
+- Anti-fraud vote pipeline: signed user/guest identity, HMAC-hashed IP and fingerprint signals, a unique `dedupeKey` enforced by the database, a per-IP cap, production-required Cloudflare Turnstile, and a serializable write
+- Production abuse controls: FingerprintJS guest signals, mandatory Turnstile checks, and Upstash Redis sliding-window limits on login, registration, joins, uploads, and voting
 - Host-armed voting window: arm/extend/close a deadline with a live countdown; votes lock at the deadline
 - Web push notifications (VAPID + service worker) and in-app banners on voting events
 - Results finalization with a crowned champion, host tie-break, and per-channel results visibility (`LIVE`, `AFTER_CLOSE`, `HIDDEN`)
@@ -45,7 +46,8 @@ A single Next.js App Router application. Pages are server components; the API is
 | Auth.js v5 (credentials + Google), Argon2id, Zod | Auth, password hashing, validation |
 | AWS SDK v3 + S3-compatible storage (MinIO / Cloudflare R2) | Audio storage via presigned URLs |
 | web-push (VAPID) | Browser push notifications |
-| Cloudflare Turnstile | Optional vote captcha |
+| Cloudflare Turnstile | Production anti-bot challenge for registration and guest voting |
+| FingerprintJS + Upstash Redis | Guest device signal and serverless sliding-window rate limits |
 | pnpm 10, Node 22 | Package manager and runtime |
 | Docker Compose | Local PostgreSQL + MinIO |
 
@@ -71,7 +73,7 @@ docker compose up -d
 pnpm db:migrate
 ```
 
-Required env vars are `DATABASE_URL`, `DIRECT_URL`, `AUTH_SECRET`, and the `S3_*` group (defaults match the Docker MinIO service). Optional groups degrade to no-ops when unset: `TURNSTILE_*` (captcha), `VAPID_*` and `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (push), `AUTH_GOOGLE_*` (OAuth), `VOTE_IP_CAP` (defaults to 40).
+Required env vars are `DATABASE_URL`, `DIRECT_URL`, `AUTH_SECRET`, and the `S3_*` group (defaults match the Docker MinIO service). Production also requires both `TURNSTILE_*` keys and `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`; protected mutations fail closed when these controls are unavailable. They remain optional during local development and tests. `VAPID_*`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, and `AUTH_GOOGLE_*` are optional; `VOTE_IP_CAP` defaults to 40.
 
 ## Usage
 
@@ -141,7 +143,7 @@ Cypher/
 
 ## Notes
 
-- PostgreSQL is authoritative for votes. The unique constraint on `Vote.dedupeKey` (namespaced per submission or per matchup, keyed by user id or hashed fingerprint) is the final guard against double voting; IP is a rate cap only, since NAT and mobile networks share addresses.
+- PostgreSQL is authoritative for votes. The unique constraint on `Vote.dedupeKey` (namespaced per submission or per matchup, keyed by user id or the signed guest token) is the final guard against double voting; fingerprint and IP are supplemental abuse signals, since NAT and mobile networks share addresses.
 - IP and fingerprint are stored only as HMAC hashes, never raw.
-- Turnstile and web push are configuration-gated: with their env keys unset the app builds and runs, the captcha check is skipped, and the push sender is a no-op.
+- Turnstile and Upstash rate limiting may be omitted only in development/tests. Production guest votes and registration require Turnstile, while protected mutations require Upstash. Web push remains optional and becomes a no-op when VAPID keys are unset.
 - The Docker Compose PostgreSQL maps to host port `5434` to avoid colliding with a local `5432`; the committed `.env.example` default uses `5432`, so align `DATABASE_URL` with whichever you run.

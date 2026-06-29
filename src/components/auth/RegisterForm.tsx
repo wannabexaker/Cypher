@@ -6,9 +6,11 @@ import {
   LoaderCircle,
   LockKeyhole,
   Mail,
+  ShieldCheck,
 } from "lucide-react";
+import Script from "next/script";
 import { signIn } from "next-auth/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,11 +19,80 @@ const genericError = "We could not create an account with those details.";
 
 type RegisterFormProps = {
   redirectTo?: string;
+  turnstileRequired: boolean;
+  turnstileSiteKey?: string;
 };
 
-export function RegisterForm({ redirectTo = "/dashboard" }: RegisterFormProps) {
+type TurnstileApi = {
+  render: (
+    container: HTMLElement,
+    options: {
+      sitekey: string;
+      theme: "dark";
+      size: "flexible";
+      appearance: "interaction-only";
+      callback: (token: string) => void;
+      "expired-callback": () => void;
+      "error-callback": () => void;
+    },
+  ) => string;
+  reset: (widgetId: string) => void;
+  remove: (widgetId: string) => void;
+};
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
+
+export function RegisterForm({
+  redirectTo = "/dashboard",
+  turnstileRequired,
+  turnstileSiteKey,
+}: RegisterFormProps) {
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const turnstileContainerRef = useRef<HTMLDivElement>(null);
+  const turnstileWidgetRef = useRef<string | null>(null);
+  const turnstileConfigured = Boolean(turnstileSiteKey);
+
+  function renderTurnstile() {
+    if (
+      !turnstileSiteKey ||
+      !window.turnstile ||
+      !turnstileContainerRef.current ||
+      turnstileWidgetRef.current
+    ) {
+      return;
+    }
+
+    turnstileWidgetRef.current = window.turnstile.render(
+      turnstileContainerRef.current,
+      {
+        sitekey: turnstileSiteKey,
+        theme: "dark",
+        size: "flexible",
+        appearance: "interaction-only",
+        callback: setTurnstileToken,
+        "expired-callback": () => setTurnstileToken(""),
+        "error-callback": () => {
+          setTurnstileToken("");
+          setError("Anti-bot verification failed. Try again.");
+        },
+      },
+    );
+  }
+
+  useEffect(
+    () => () => {
+      if (turnstileWidgetRef.current && window.turnstile) {
+        window.turnstile.remove(turnstileWidgetRef.current);
+      }
+    },
+    [],
+  );
 
   async function handleRegister(formData: FormData) {
     setError("");
@@ -31,6 +102,7 @@ export function RegisterForm({ redirectTo = "/dashboard" }: RegisterFormProps) {
       email: String(formData.get("email") ?? ""),
       username: String(formData.get("username") ?? ""),
       password: String(formData.get("password") ?? ""),
+      ...(turnstileToken ? { turnstileToken } : {}),
     };
 
     const response = await fetch("/api/auth/register", {
@@ -42,6 +114,10 @@ export function RegisterForm({ redirectTo = "/dashboard" }: RegisterFormProps) {
     if (!response.ok) {
       setError(genericError);
       setPending(false);
+      if (turnstileWidgetRef.current && window.turnstile) {
+        window.turnstile.reset(turnstileWidgetRef.current);
+        setTurnstileToken("");
+      }
       return;
     }
 
@@ -167,12 +243,38 @@ export function RegisterForm({ redirectTo = "/dashboard" }: RegisterFormProps) {
           </p>
         )}
 
+        {turnstileRequired && turnstileSiteKey && (
+          <>
+            <Script
+              src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+              strategy="afterInteractive"
+              onReady={renderTurnstile}
+            />
+            <div ref={turnstileContainerRef} className="min-h-16" />
+            <p className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+              <ShieldCheck className="size-3.5 text-cyan" aria-hidden="true" />
+              {turnstileToken
+                ? "Anti-bot check ready."
+                : "Complete the anti-bot check to register."}
+            </p>
+          </>
+        )}
+
+        {turnstileRequired && !turnstileConfigured && (
+          <p role="alert" className="text-sm text-magenta">
+            Account protection is temporarily unavailable.
+          </p>
+        )}
+
         <Button
           type="submit"
           variant="gradient"
           size="lg"
           className="w-full"
-          disabled={pending}
+          disabled={
+            pending ||
+            (turnstileRequired && (!turnstileConfigured || !turnstileToken))
+          }
         >
           {pending ? (
             <LoaderCircle className="motion-safe:animate-spin" />

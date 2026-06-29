@@ -9,7 +9,10 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import {
   castWlVote,
+  VoteFingerprintError,
   VoteIpCapError,
+  VoteRateLimitError,
+  VoteSecurityUnavailableError,
   VoteTurnstileError,
 } from "@/lib/cast-wl-vote";
 import {
@@ -295,6 +298,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
       { status: result.created ? 201 : 200 },
     );
   } catch (error) {
+    if (error instanceof VoteFingerprintError) {
+      return NextResponse.json(
+        { error: "Device verification is required for guest voting." },
+        { status: 403 },
+      );
+    }
     if (error instanceof VoteTurnstileError) {
       return NextResponse.json(
         { error: "Complete the anti-bot check before voting." },
@@ -305,6 +314,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Too many votes came from this network." },
         { status: 429 },
+      );
+    }
+    if (error instanceof VoteRateLimitError) {
+      return NextResponse.json(
+        { error: "Too many vote attempts. Try again shortly." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(error.retryAfterSeconds) },
+        },
+      );
+    }
+    if (error instanceof VoteSecurityUnavailableError) {
+      return NextResponse.json(
+        { error: "Voting protection is temporarily unavailable." },
+        { status: 503 },
       );
     }
 

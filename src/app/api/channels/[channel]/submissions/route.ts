@@ -18,6 +18,11 @@ import {
 } from "@/lib/media";
 import { findChannelMembership, resolveChannelIdentity } from "@/lib/membership";
 import { prisma } from "@/lib/prisma";
+import {
+  enforceRequestRateLimit,
+  RateLimitExceededError,
+  RateLimitUnavailableError,
+} from "@/lib/rate-limit";
 import { deleteObject, headObject, readObjectPrefix } from "@/lib/storage";
 import { channelCodeSchema } from "@/lib/validation/channels";
 import { createSubmissionSchema } from "@/lib/validation/submissions";
@@ -33,6 +38,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const parsedCode = channelCodeSchema.safeParse(rawCode);
   if (!parsedCode.success) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
+  }
+
+  try {
+    await enforceRequestRateLimit("upload-ip", request);
+  } catch (error) {
+    if (error instanceof RateLimitExceededError) {
+      return NextResponse.json(
+        { error: "Too many submission attempts. Try again shortly." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(error.retryAfterSeconds) },
+        },
+      );
+    }
+    if (error instanceof RateLimitUnavailableError) {
+      return NextResponse.json(
+        { error: "Submission protection is temporarily unavailable." },
+        { status: 503 },
+      );
+    }
+    throw error;
   }
 
   let body: unknown = {};

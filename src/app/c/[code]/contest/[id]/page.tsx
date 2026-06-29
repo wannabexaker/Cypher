@@ -521,6 +521,7 @@ async function LeaderboardContestBody({
                         canSeeCounts ? undefined : countsHiddenLabel
                       }
                       contestId={contestId}
+                      fingerprintRequired={!user}
                     />
                   </li>
                 );
@@ -869,6 +870,7 @@ async function BattleContestBody({
                                     turnstileSiteKey={turnstileSiteKey}
                                     votePath={`/api/channels/${channelCode}/battles/votes`}
                                     extraPayload={{ matchupId: matchup.id }}
+                                    fingerprintRequired={!user}
                                   />
                                 </div>
                               );

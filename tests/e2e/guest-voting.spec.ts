@@ -60,6 +60,29 @@ test("guest judge joins and casts independent W and L votes", async ({
     await firstTrack.getByRole("button", { name: "Vote Win" }).click();
     await expect(firstTrack.getByText("You voted W.", { exact: true })).toBeVisible();
 
+    const replay = await page.evaluate(
+      async ({ channelCode, submissionId }) => {
+        const response = await fetch(`/api/channels/${channelCode}/votes`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            submissionId,
+            choice: "LOSS",
+            fingerprint: "rotated-e2e-fingerprint",
+          }),
+        });
+        return { status: response.status, body: await response.json() };
+      },
+      {
+        channelCode: fixture.channel.code,
+        submissionId: fixture.submissions[0].id,
+      },
+    );
+    expect(replay).toMatchObject({
+      status: 200,
+      body: { yourChoice: "WIN", locked: true },
+    });
+
     await secondTrack.getByRole("button", { name: "Vote Loss" }).click();
     await expect(secondTrack.getByText("You voted L.", { exact: true })).toBeVisible();
 
@@ -74,6 +97,7 @@ test("guest judge joins and casts independent W and L votes", async ({
       },
     });
     expect(votes).toHaveLength(2);
+    expect(votes.every((vote) => Boolean(vote.fingerprintHash))).toBe(true);
     expect(new Set(votes.map((vote) => vote.choice))).toEqual(
       new Set(["WIN", "LOSS"]),
     );

@@ -4,12 +4,38 @@ import { type NextRequest, NextResponse } from "next/server";
 import { extensionMatchesMime, sanitizeFilename } from "@/lib/media";
 import { findChannelMembership, resolveChannelIdentity } from "@/lib/membership";
 import { prisma } from "@/lib/prisma";
+import {
+  enforceRequestRateLimit,
+  RateLimitExceededError,
+  RateLimitUnavailableError,
+} from "@/lib/rate-limit";
 import { buildStorageKey, createUploadUrl } from "@/lib/storage";
 import { signUploadSchema } from "@/lib/validation/submissions";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  try {
+    await enforceRequestRateLimit("upload-ip", request);
+  } catch (error) {
+    if (error instanceof RateLimitExceededError) {
+      return NextResponse.json(
+        { error: "Too many upload attempts. Try again shortly." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(error.retryAfterSeconds) },
+        },
+      );
+    }
+    if (error instanceof RateLimitUnavailableError) {
+      return NextResponse.json(
+        { error: "Upload protection is temporarily unavailable." },
+        { status: 503 },
+      );
+    }
+    throw error;
+  }
+
   let body: unknown = {};
   try {
     const text = await request.text();
