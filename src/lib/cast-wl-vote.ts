@@ -35,6 +35,7 @@ type CastWlVoteInput = {
   fingerprint?: string;
   turnstileToken?: string;
   dedupeKeyForIdentity: (identityKey: string) => string;
+  legacyDedupeKeysForIdentity?: (identityKey: string) => string[];
   roundId?: string;
   matchupId?: string;
   trackVoteRoundId?: string; // H13: for track round voting
@@ -66,9 +67,16 @@ export async function castWlVote(input: CastWlVoteInput): Promise<CastWlVoteResu
       ? `f:${fingerprintHash}`
       : `g:${input.identity.guestToken ?? "unknown"}`;
   const dedupeKey = input.dedupeKeyForIdentity(voterIdentity);
+  const acceptedDedupeKeys = [
+    dedupeKey,
+    ...(input.legacyDedupeKeysForIdentity?.(voterIdentity) ?? []),
+  ];
 
-  const priorVote = await prisma.vote.findUnique({
-    where: { dedupeKey },
+  const priorVote = await prisma.vote.findFirst({
+    where: {
+      dedupeKey: { in: acceptedDedupeKeys },
+      submissionId: input.submissionId,
+    },
     select: { choice: true },
   });
 
@@ -89,8 +97,11 @@ export async function castWlVote(input: CastWlVoteInput): Promise<CastWlVoteResu
     try {
       return await prisma.$transaction(
         async (transaction) => {
-          const existing = await transaction.vote.findUnique({
-            where: { dedupeKey },
+          const existing = await transaction.vote.findFirst({
+            where: {
+              dedupeKey: { in: acceptedDedupeKeys },
+              submissionId: input.submissionId,
+            },
             select: { choice: true },
           });
 

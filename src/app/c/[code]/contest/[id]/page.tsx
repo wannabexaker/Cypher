@@ -181,7 +181,7 @@ export default async function ContestRoomPage({ params }: PageProps) {
 
       <section className="section-shell py-10 sm:py-12">
         <p className="section-kicker">
-          {channel.name} Â· {modeLabel} contest {numberLabel}
+          {channel.name} · {modeLabel} contest {numberLabel}
         </p>
         <h1 className="display-text mt-3 text-[clamp(2.5rem,8vw,5rem)] leading-[0.9] text-foreground">
           {modeLabel} {numberLabel}
@@ -189,7 +189,7 @@ export default async function ContestRoomPage({ params }: PageProps) {
         <p className="mt-3 text-sm text-muted-foreground">
           Started {formatStartedAt(contest.createdAt)}
           {contest.completedAt
-            ? ` Â· Completed ${formatStartedAt(contest.completedAt)}`
+            ? ` · Completed ${formatStartedAt(contest.completedAt)}`
             : ""}
         </p>
         {contest.votingClosesAt && (
@@ -310,7 +310,7 @@ async function LeaderboardContestBody({
     },
   });
 
-  // Per-contest dedupe of the caller's votes â€” needed for the WIN/LOSS pill
+  // Per-contest dedupe of the caller's votes — needed for the WIN/LOSS pill
   // state on each VoteControl.
   const ownVotes = membership
     ? await prisma.vote.findMany({
@@ -349,7 +349,7 @@ async function LeaderboardContestBody({
               rank: entry.rank,
               artistName: part.submission.artistName,
               trackTitle: part.submission.trackTitle,
-              // rankingSnapshot.winPct is a 0..1 fraction â€” multiply for display.
+              // rankingSnapshot.winPct is a 0..1 fraction — multiply for display.
               winPct: Math.round(entry.winPct * 100),
               wins: entry.wins,
               losses: entry.losses,
@@ -410,7 +410,7 @@ async function LeaderboardContestBody({
     const winPct = total === 0 ? 0 : Math.round((entry.wins / total) * 100);
     return {
       id: entry.submission.id,
-      label: `${entry.submission.artistName} â€” ${entry.submission.trackTitle}`,
+      label: `${entry.submission.artistName} — ${entry.submission.trackTitle}`,
       winPct,
       total,
     };
@@ -420,7 +420,7 @@ async function LeaderboardContestBody({
       ? (() => {
           const sub = submissionsById.get(championSubmissionId);
           return sub
-            ? `${sub.submission.artistName} â€” ${sub.submission.trackTitle}`
+            ? `${sub.submission.artistName} — ${sub.submission.trackTitle}`
             : null;
         })()
       : finalizeTracks[0]?.label ?? null;
@@ -474,7 +474,7 @@ async function LeaderboardContestBody({
                         <span className="font-mono text-xs text-muted-foreground">
                           #{liveEntries[index]?.rank ?? index + 1}
                         </span>
-                        {sub.artistName} â€” {sub.trackTitle}
+                        {sub.artistName} — {sub.trackTitle}
                         {isChampion && (
                           <span className="inline-flex items-center gap-1 rounded-full border border-lime/30 bg-lime/10 px-2 py-0.5 font-mono text-[0.625rem] font-bold tracking-[0.12em] text-lime uppercase">
                             <Crown className="size-3" aria-hidden="true" />
@@ -584,7 +584,7 @@ async function LeaderboardContestBody({
                 Crowned
               </p>
               <p className="mt-2 text-lg font-bold text-foreground">
-                {champion.artistName} â€” {champion.trackTitle}
+                {champion.artistName} — {champion.trackTitle}
               </p>
             </div>
           )}

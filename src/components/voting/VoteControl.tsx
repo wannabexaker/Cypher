@@ -79,7 +79,16 @@ export function VoteControl({
   const [lossCount, setLossCount] = useState(initialLossCount);
   const [choice, setChoice] = useState<VoteChoice | undefined>(initialChoice);
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  // H23 P3.6: single source of truth for the "You voted W/L." confirmation.
+  // Previously we rendered it twice — once via aria-live (set after cast) and
+  // once via a {voteLocked && <p>…} block — which both visually duplicated
+  // the line and announced it twice to screen readers. Seed `message` from
+  // `initialChoice` so the confirmation persists across page refreshes.
+  const [message, setMessage] = useState(
+    initialChoice
+      ? `You voted ${initialChoice === "WIN" ? "W" : "L"}.`
+      : "",
+  );
   const [turnstileToken, setTurnstileToken] = useState("");
   const turnstileContainerRef = useRef<HTMLDivElement>(null);
   const turnstileWidgetRef = useRef<string | null>(null);
@@ -280,10 +289,6 @@ export function VoteControl({
           {pending ? <LoaderCircle className="motion-safe:animate-spin" /> : "L"}
         </Button>
       </div>
-
-      {voteLocked && (
-        <p className="mt-3 text-sm text-cyan">You voted {choice === "WIN" ? "W" : "L"}.</p>
-      )}
 
       {turnstileSiteKey && canVote && (
         <>
