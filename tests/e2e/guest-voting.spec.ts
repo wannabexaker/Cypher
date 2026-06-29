@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { GUEST_DISPLAY_NAME_STORAGE_KEY } from "../../src/lib/guest-profile";
+
 import {
   cleanupChannelFixture,
   createLeaderboardFixture,
@@ -15,11 +17,26 @@ test("guest judge joins and casts independent W and L votes", async ({
   const guestName = `E2E Judge ${fixture.channel.code}`;
 
   try {
+    await page.addInitScript(
+      ({ key, value }) => window.localStorage.setItem(key, value),
+      { key: GUEST_DISPLAY_NAME_STORAGE_KEY, value: "Remembered Judge" },
+    );
     await page.goto(`/c/${fixture.channel.code}`);
+    await expect(page.getByLabel("Display name")).toHaveValue(
+      "Remembered Judge",
+    );
     await page.getByLabel("Display name").fill(guestName);
     await page.getByRole("button", { name: "Judge Vote, don't submit" }).click();
     await page.getByRole("button", { name: "Join room" }).click();
     await expect(page.getByText("You're in", { exact: true })).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (key) => window.localStorage.getItem(key),
+          GUEST_DISPLAY_NAME_STORAGE_KEY,
+        ),
+      )
+      .toBe(guestName);
 
     await page.goto(
       `/c/${fixture.channel.code}/contest/${fixture.contest.id}`,

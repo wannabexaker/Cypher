@@ -23,6 +23,7 @@ export default defineConfig({
       include: [
         "src/lib/channel-code.ts",
         "src/lib/embeds.ts",
+        "src/lib/guest-profile.ts",
         "src/lib/votes.ts",
         "src/lib/validation/*.ts",
       ],
