@@ -8,6 +8,7 @@ import {
 import { type NextRequest, NextResponse } from "next/server";
 
 import { classifyEmbedUrl } from "@/lib/embeds";
+import { bumpChannelActivity } from "@/lib/contests";
 import {
   isAudioMimeType,
   MAGIC_BYTE_READ_LENGTH,
@@ -16,8 +17,20 @@ import {
   sourceTypeForMime,
 } from "@/lib/media";
 import { findChannelMembership, resolveChannelIdentity } from "@/lib/membership";
+import { scanMediaAsset } from "@/lib/malware-scan";
 import { prisma } from "@/lib/prisma";
-import { deleteObject, headObject, readObjectPrefix } from "@/lib/storage";
+import {
+  enforceRequestRateLimit,
+  RateLimitExceededError,
+  RateLimitUnavailableError,
+} from "@/lib/rate-limit";
+import {
+  deleteObject,
+  headObject,
+  isFinalStorageKey,
+  promoteUploadObject,
+  readObjectPrefix,
+} from "@/lib/storage";
 import { channelCodeSchema } from "@/lib/validation/channels";
 import { createSubmissionSchema } from "@/lib/validation/submissions";
 
@@ -32,6 +45,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const parsedCode = channelCodeSchema.safeParse(rawCode);
   if (!parsedCode.success) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
+  }
+
+  try {
+    await enforceRequestRateLimit("upload-ip", request);
+  } catch (error) {
+    if (error instanceof RateLimitExceededError) {
+      return NextResponse.json(
+        { error: "Too many submission attempts. Try again shortly." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(error.retryAfterSeconds) },
+        },
+      );
+    }
+    if (error instanceof RateLimitUnavailableError) {
+      return NextResponse.json(
+        { error: "Submission protection is temporarily unavailable." },
+        { status: 503 },
+      );
+    }
+    throw error;
   }
 
   let body: unknown = {};
@@ -130,6 +164,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
         storageKey: true,
         mimeType: true,
         sizeBytes: true,
+        originalFilename: true,
+        scanStatus: true,
         submission: { select: { id: true } },
       },
     });
@@ -142,8 +178,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     // Ownership: registered users own their assets; guest uploads have a null
-    // owner and are claimed via the secret random asset id (full identity
-    // binding is deferred to H08 — documented residual risk).
+    // owner and are claimed via the secret random asset id.
     const ownsAsset = identity.user
       ? asset.ownerUserId === identity.user.id
       : asset.ownerUserId === null;
@@ -171,8 +206,76 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Server-side verification: object exists + size within limits + matches.
-    const head = await headObject(asset.storageKey);
+    if (asset.scanStatus === ScanStatus.INFECTED) {
+      await deleteObject(asset.storageKey);
+      return NextResponse.json(
+        { error: "The uploaded file did not pass the security scan." },
+        { status: 422 },
+      );
+    }
+
+    // The browser receives a PUT URL only for the staging key. Copy its current
+    // bytes to a new server-only key before inspection so the upload URL cannot
+    // replace an object after it has passed the malware scan.
+    let trustedStorageKey = asset.storageKey;
+    if (
+      asset.scanStatus !== ScanStatus.CLEAN &&
+      !isFinalStorageKey(trustedStorageKey)
+    ) {
+      let promotedStorageKey: string;
+      try {
+        promotedStorageKey = await promoteUploadObject({
+          sourceKey: trustedStorageKey,
+          contentType: asset.mimeType,
+        });
+      } catch (error) {
+        console.error("Failed to promote staged upload", error);
+        return NextResponse.json(
+          { error: "Upload was not completed." },
+          { status: 422 },
+        );
+      }
+
+      try {
+        const promoted = await prisma.mediaAsset.updateMany({
+          where: {
+            id: asset.id,
+            storageKey: trustedStorageKey,
+            scanStatus: ScanStatus.PENDING,
+          },
+          data: { storageKey: promotedStorageKey },
+        });
+
+        if (promoted.count === 0) {
+          await deleteObject(promotedStorageKey);
+          const currentAsset = await prisma.mediaAsset.findUnique({
+            where: { id: asset.id },
+            select: { storageKey: true },
+          });
+          if (!currentAsset || !isFinalStorageKey(currentAsset.storageKey)) {
+            return NextResponse.json(
+              { error: "Upload is already being processed." },
+              { status: 409 },
+            );
+          }
+          trustedStorageKey = currentAsset.storageKey;
+        } else {
+          const stagingStorageKey = trustedStorageKey;
+          trustedStorageKey = promotedStorageKey;
+          await deleteObject(stagingStorageKey);
+        }
+      } catch (error) {
+        await deleteObject(promotedStorageKey);
+        console.error("Failed to persist promoted upload", error);
+        return NextResponse.json(
+          { error: "Unable to secure the upload right now." },
+          { status: 500 },
+        );
+      }
+    }
+
+    // Verify and scan only the immutable final object.
+    const head = await headObject(trustedStorageKey);
     if (!head) {
       return NextResponse.json(
         { error: "Upload was not completed." },
@@ -185,7 +288,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       head.contentLength > MAX_UPLOAD_BYTES ||
       head.contentLength !== asset.sizeBytes
     ) {
-      await deleteObject(asset.storageKey);
+      await deleteObject(trustedStorageKey);
       return NextResponse.json(
         { error: "Uploaded file size is invalid." },
         { status: 422 },
@@ -194,15 +297,44 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     // Magic-byte check via a ranged GET of the leading bytes.
     const prefix = await readObjectPrefix(
-      asset.storageKey,
+      trustedStorageKey,
       MAGIC_BYTE_READ_LENGTH,
     );
     if (!prefix || !magicBytesMatchMime(prefix, asset.mimeType)) {
-      await deleteObject(asset.storageKey);
+      await deleteObject(trustedStorageKey);
       return NextResponse.json(
         { error: "File content does not match its type." },
         { status: 422 },
       );
+    }
+
+    if (asset.scanStatus !== ScanStatus.CLEAN) {
+      const scan = await scanMediaAsset({
+        assetId: asset.id,
+        storageKey: trustedStorageKey,
+        mimeType: asset.mimeType,
+        sizeBytes: asset.sizeBytes,
+        originalFilename: asset.originalFilename,
+      });
+
+      if (scan.verdict === "infected") {
+        await prisma.mediaAsset.update({
+          where: { id: asset.id },
+          data: { scanStatus: ScanStatus.INFECTED },
+        });
+        await deleteObject(trustedStorageKey);
+        return NextResponse.json(
+          { error: "The uploaded file did not pass the security scan." },
+          { status: 422 },
+        );
+      }
+
+      if (scan.verdict === "unavailable") {
+        return NextResponse.json(
+          { error: "File security scanning is temporarily unavailable." },
+          { status: 503 },
+        );
+      }
     }
 
     sourceType = sourceTypeForMime(asset.mimeType) as SourceType;
@@ -302,6 +434,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (staleStorageKey) {
     await deleteObject(staleStorageKey);
   }
+
+  // H16a: a new (or replaced) submission means the room is alive.
+  await bumpChannelActivity(prisma, channel.id);
 
   return NextResponse.json(
     { submissionId, status: SubmissionStatus.PENDING },

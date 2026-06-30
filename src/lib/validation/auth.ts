@@ -22,6 +22,7 @@ export const registerSchema = z.object({
     .toLowerCase()
     .regex(/^[a-z0-9_]{3,20}$/),
   password,
+  turnstileToken: z.string().trim().min(1).max(2048).optional(),
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;

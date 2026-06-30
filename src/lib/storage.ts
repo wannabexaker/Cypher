@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -18,6 +20,8 @@ import {
 const PRESIGN_PUT_TTL_SECONDS = 300; // ≤ 5 min for the upload window
 const DEFAULT_MEDIA_URL_TTL_SECONDS = 300;
 const MAX_MEDIA_URL_TTL_SECONDS = 3600;
+const MEDIA_STAGING_PREFIX = "media/staging/";
+const MEDIA_FINAL_PREFIX = "media/final/";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -55,9 +59,18 @@ function getStorage(): { client: S3Client; bucket: string } {
   return { client: cachedClient, bucket: cachedBucket };
 }
 
-export function buildStorageKey(mime: AudioMimeType): string {
-  // Random key — never derived from the user filename.
-  return `media/${randomUUID()}.${extensionForMime(mime)}`;
+export function buildUploadStorageKey(mime: AudioMimeType): string {
+  // The browser can write only to this temporary namespace.
+  return `${MEDIA_STAGING_PREFIX}${randomUUID()}.${extensionForMime(mime)}`;
+}
+
+export function buildFinalStorageKey(mime: AudioMimeType): string {
+  // Final keys are generated server-side and never receive a presigned PUT URL.
+  return `${MEDIA_FINAL_PREFIX}${randomUUID()}.${extensionForMime(mime)}`;
+}
+
+export function isFinalStorageKey(key: string): boolean {
+  return key.startsWith(MEDIA_FINAL_PREFIX);
 }
 
 export async function createUploadUrl({
@@ -107,6 +120,32 @@ export async function createDownloadUrl({
   });
 }
 
+export async function promoteUploadObject({
+  sourceKey,
+  contentType,
+}: {
+  sourceKey: string;
+  contentType: AudioMimeType;
+}): Promise<string> {
+  const { client, bucket } = getStorage();
+  const finalKey = buildFinalStorageKey(contentType);
+  const encodedCopySource = [bucket, ...sourceKey.split("/")]
+    .map(encodeURIComponent)
+    .join("/");
+
+  await client.send(
+    new CopyObjectCommand({
+      Bucket: bucket,
+      Key: finalKey,
+      CopySource: encodedCopySource,
+      ContentType: contentType,
+      MetadataDirective: "REPLACE",
+    }),
+  );
+
+  return finalKey;
+}
+
 export type StorageObjectHead = {
   contentLength: number;
   contentType: string | null;
@@ -147,11 +186,44 @@ export async function readObjectPrefix(
   }
 }
 
-export async function deleteObject(key: string): Promise<void> {
+export async function deleteObject(key: string): Promise<boolean> {
   const { client, bucket } = getStorage();
   try {
     await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    return true;
   } catch {
-    // Best-effort cleanup; a leftover private object is harmless.
+    return false;
   }
+}
+
+export type StorageObject = {
+  key: string;
+  lastModified: Date | null;
+};
+
+export async function listStorageObjectsPage({
+  continuationToken,
+  maxKeys = 1_000,
+}: {
+  continuationToken?: string;
+  maxKeys?: number;
+} = {}) {
+  const { client, bucket } = getStorage();
+  const result = await client.send(
+    new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: "media/",
+      ContinuationToken: continuationToken,
+      MaxKeys: Math.min(Math.max(maxKeys, 1), 1_000),
+    }),
+  );
+
+  return {
+    objects: (result.Contents ?? []).flatMap((object) =>
+      object.Key
+        ? [{ key: object.Key, lastModified: object.LastModified ?? null }]
+        : [],
+    ),
+    nextContinuationToken: result.NextContinuationToken,
+  };
 }

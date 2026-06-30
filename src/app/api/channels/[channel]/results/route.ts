@@ -1,11 +1,14 @@
 import {
   ChannelStatus,
+  ContestMode,
+  ContestStatus,
   ResultsVisibility,
   SubmissionStatus,
 } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { canManageChannel } from "@/lib/channels";
+import { getActiveContest, getLatestCompletedContest } from "@/lib/contests";
 import {
   findChannelMembership,
   resolveChannelIdentity,
@@ -46,8 +49,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
         select: {
           id: true,
           trackTitle: true,
-          winCount: true,
-          lossCount: true,
           createdAt: true,
         },
       },
@@ -80,9 +81,74 @@ export async function GET(request: NextRequest, context: RouteContext) {
   }
 
   const completed = channel.status === ChannelStatus.COMPLETED;
-  const votingClosed = Boolean(
+
+  // H22 fix #7: Submission.winCount/lossCount have been dead since H20a — the
+  // mirror was dropped when concurrent contests landed and counts moved to
+  // ContestParticipant. Resolve the relevant LEADERBOARD contest (active
+  // VOTING_OPEN if present, otherwise the latest completed) and rank from
+  // its participants so /results reflects the same numbers the per-contest
+  // view shows.
+  const activeLeaderboard = await getActiveContest(
+    prisma,
+    channel.id,
+    ContestMode.LEADERBOARD,
+  );
+  const liveContest =
+    activeLeaderboard?.status === ContestStatus.VOTING_OPEN
+      ? activeLeaderboard
+      : null;
+  const latestCompleted = await getLatestCompletedContest(
+    prisma,
+    channel.id,
+    ContestMode.LEADERBOARD,
+  );
+  const sourceContest = liveContest ?? latestCompleted;
+  const sourceContestRow = sourceContest
+    ? await prisma.contest.findUnique({
+        where: { id: sourceContest.id },
+        select: {
+          id: true,
+          status: true,
+          votingClosesAt: true,
+          completedAt: true,
+          championSubmissionId: true,
+        },
+      })
+    : null;
+
+  const participantCounts = sourceContestRow
+    ? await prisma.contestParticipant.findMany({
+        where: { contestId: sourceContestRow.id },
+        select: {
+          submissionId: true,
+          wins: true,
+          losses: true,
+        },
+      })
+    : [];
+  const countsBySubmission = new Map(
+    participantCounts.map((row) => [
+      row.submissionId,
+      { winCount: row.wins, lossCount: row.losses },
+    ]),
+  );
+
+  const contestCompleted = sourceContestRow?.status === ContestStatus.COMPLETED;
+  const championSubmissionId =
+    sourceContestRow?.championSubmissionId ?? channel.championSubmissionId ?? null;
+  const completedAt = sourceContestRow?.completedAt ?? channel.completedAt ?? null;
+  const effectiveCompleted = completed || contestCompleted;
+
+  // Voting-closed signal is per-contest (per H20a) when we have a contest;
+  // fall back to the channel-level field for truly legacy data.
+  const contestVotingClosed = Boolean(
+    sourceContestRow?.votingClosesAt &&
+      Date.now() >= sourceContestRow.votingClosesAt.getTime(),
+  );
+  const channelVotingClosed = Boolean(
     channel.votingClosesAt && Date.now() >= channel.votingClosesAt.getTime(),
   );
+  const votingClosed = contestVotingClosed || channelVotingClosed;
 
   // The host, a platform ADMIN, and channel MODERATORs run the room, so they
   // always see live counts regardless of the visibility setting.
@@ -94,22 +160,30 @@ export async function GET(request: NextRequest, context: RouteContext) {
         canManageChannel(identity.user, { hostId: channel.hostId }),
     );
 
+  // H22 fix #2: HIDDEN must never expose counts/rankings to non-members,
+  // even after the contest is completed. AFTER_CLOSE opens up once voting
+  // closed or the contest is finalized; LIVE always; host/mods always.
   const canSeeCounts =
+    callerIsHostOrModerator ||
     channel.resultsVisibility === ResultsVisibility.LIVE ||
     (channel.resultsVisibility === ResultsVisibility.AFTER_CLOSE &&
-      (votingClosed || completed)) ||
-    (channel.resultsVisibility === ResultsVisibility.HIDDEN && completed) ||
-    callerIsHostOrModerator;
+      (votingClosed || effectiveCompleted));
 
   const ranked = channel.submissions
-    .map((submission) => ({
-      submissionId: submission.id,
-      trackTitle: submission.trackTitle,
-      winCount: submission.winCount,
-      lossCount: submission.lossCount,
-      createdAt: submission.createdAt,
-      ...getVoteSplit(submission),
-    }))
+    .map((submission) => {
+      const counts = countsBySubmission.get(submission.id) ?? {
+        winCount: 0,
+        lossCount: 0,
+      };
+      return {
+        submissionId: submission.id,
+        trackTitle: submission.trackTitle,
+        winCount: counts.winCount,
+        lossCount: counts.lossCount,
+        createdAt: submission.createdAt,
+        ...getVoteSplit(counts),
+      };
+    })
     .sort((a, b) => {
       // When counts are hidden, never leak the ranking order either — fall back
       // to a stable submission order (earliest first).
@@ -129,10 +203,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   const base = {
     status: channel.status,
-    completed,
-    completedAt: channel.completedAt,
-    championSubmissionId: channel.championSubmissionId,
-    votingClosesAt: channel.votingClosesAt,
+    completed: effectiveCompleted,
+    completedAt,
+    championSubmissionId: canSeeCounts ? championSubmissionId : null,
+    votingClosesAt: sourceContestRow?.votingClosesAt ?? channel.votingClosesAt,
     votingClosed,
     choices,
   };
@@ -140,7 +214,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   if (!canSeeCounts) {
     const reason =
       channel.resultsVisibility === ResultsVisibility.HIDDEN
-        ? "Results reveal when the host finalizes the room."
+        ? "Results stay hidden in this room."
         : "Results reveal when voting closes.";
 
     return NextResponse.json({

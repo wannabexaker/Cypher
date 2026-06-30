@@ -1,5 +1,6 @@
 import {
-  ChannelStatus,
+  ContestMode,
+  ContestStatus,
   MatchupStatus,
   RoundStatus,
 } from "@prisma/client";
@@ -7,9 +8,13 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import {
   castWlVote,
+  VoteFingerprintError,
   VoteIpCapError,
+  VoteRateLimitError,
+  VoteSecurityUnavailableError,
   VoteTurnstileError,
 } from "@/lib/cast-wl-vote";
+import { bumpChannelActivity } from "@/lib/contests";
 import {
   findChannelMembership,
   resolveChannelIdentity,
@@ -47,19 +52,28 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   const channel = await prisma.channel.findUnique({
     where: { code: parsedCode.data },
-    select: { id: true, status: true },
+    select: {
+      id: true,
+      allowGuestVotes: true,
+      requireLoginToVote: true,
+    },
   });
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
   }
-  if (channel.status !== ChannelStatus.BATTLE) {
-    return NextResponse.json(
-      { error: "Battle voting is only open while the room is in battle mode." },
-      { status: 409 },
-    );
-  }
+  // H20a: no more channel.status === BATTLE gate. The room stays OPEN forever
+  // and "battle-ness" lives on the active BATTLE Contest checked below.
 
   const identity = await resolveChannelIdentity(request);
+  // H22 fix #3: honor per-channel guest-vote toggles for battle votes too —
+  // they were previously ignored, letting anonymous voters slip past a host
+  // who turned off guest voting.
+  if (!identity.user && (channel.allowGuestVotes === false || channel.requireLoginToVote === true)) {
+    return NextResponse.json(
+      { error: "Sign in to vote in this room." },
+      { status: 403 },
+    );
+  }
   const membership = await findChannelMembership(channel.id, identity);
   if (!membership) {
     return NextResponse.json(
@@ -80,6 +94,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
         select: {
           channelId: true,
           status: true,
+          contest: {
+            select: {
+              id: true,
+              mode: true,
+              status: true,
+              votingClosesAt: true,
+            },
+          },
         },
       },
     },
@@ -109,6 +131,28 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   try {
+    // The matchup's round owns the contest. Never infer the target from the
+    // newest active battle: multiple battle contests may run concurrently.
+    const contest = matchup.round.contest;
+    if (
+      !contest ||
+      contest.mode !== ContestMode.BATTLE ||
+      contest.status !== ContestStatus.VOTING_OPEN
+    ) {
+      return NextResponse.json(
+        { error: "This battle contest is not accepting votes." },
+        { status: 409 },
+      );
+    }
+    if (
+      contest.votingClosesAt &&
+      Date.now() >= contest.votingClosesAt.getTime()
+    ) {
+      return NextResponse.json(
+        { error: "Voting has closed for this contest." },
+        { status: 409 },
+      );
+    }
     const result = await castWlVote({
       request,
       identity,
@@ -120,10 +164,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
       choice: parsed.data.choice,
       fingerprint: parsed.data.fingerprint,
       turnstileToken: parsed.data.turnstileToken,
+      contestId: contest.id,
+      // Battle verdicts are W/L per track, so the two sides of a matchup need
+      // independent dedupe keys. The submission segment still guarantees one
+      // immutable vote per identity for each track.
       dedupeKeyForIdentity: (identityKey) =>
         `m:${matchup.id}:s:${parsed.data.submissionId}:${identityKey}`,
+      legacyDedupeKeysForIdentity: (identityKey) => [
+        `m:${matchup.id}:${identityKey}`,
+      ],
       tallyWhere: { matchupId: matchup.id },
     });
+
+    if (result.created) {
+      await bumpChannelActivity(prisma, channel.id);
+    }
 
     return NextResponse.json(
       {
@@ -133,11 +188,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
         lossCount: result.lossCount,
         total: result.total,
         winPct: getVoteSplit(result).winPct,
-        yourChoice: parsed.data.choice,
+        yourChoice: result.choice,
+        locked: result.locked,
       },
       { status: result.created ? 201 : 200 },
     );
   } catch (error) {
+    if (error instanceof VoteFingerprintError) {
+      return NextResponse.json(
+        { error: "Device verification is required for guest voting." },
+        { status: 403 },
+      );
+    }
     if (error instanceof VoteTurnstileError) {
       return NextResponse.json(
         { error: "Complete the anti-bot check before voting." },
@@ -148,6 +210,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Too many votes came from this network." },
         { status: 429 },
+      );
+    }
+    if (error instanceof VoteRateLimitError) {
+      return NextResponse.json(
+        { error: "Too many vote attempts. Try again shortly." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(error.retryAfterSeconds) },
+        },
+      );
+    }
+    if (error instanceof VoteSecurityUnavailableError) {
+      return NextResponse.json(
+        { error: "Voting protection is temporarily unavailable." },
+        { status: 503 },
       );
     }
 

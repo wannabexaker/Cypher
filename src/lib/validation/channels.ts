@@ -3,6 +3,7 @@ import {
   ChannelVisibility,
   MemberRole,
   ParticipationType,
+  ResultsVisibility,
 } from "@prisma/client";
 import { z } from "zod";
 
@@ -31,6 +32,11 @@ const editableChannelFieldsSchema = z.object({
     ChannelVisibility.PUBLIC,
     ChannelVisibility.UNLISTED,
   ]),
+  resultsVisibility: z.enum([
+    ResultsVisibility.LIVE,
+    ResultsVisibility.AFTER_CLOSE,
+    ResultsVisibility.HIDDEN,
+  ]),
   allowGuestUploads: z.boolean(),
 });
 
@@ -38,6 +44,13 @@ export const createChannelSchema = editableChannelFieldsSchema.extend({
   visibility: z
     .enum([ChannelVisibility.PUBLIC, ChannelVisibility.UNLISTED])
     .default(ChannelVisibility.UNLISTED),
+  resultsVisibility: z
+    .enum([
+      ResultsVisibility.LIVE,
+      ResultsVisibility.AFTER_CLOSE,
+      ResultsVisibility.HIDDEN,
+    ])
+    .default(ResultsVisibility.LIVE),
   allowGuestUploads: z.boolean().default(false),
 });
 

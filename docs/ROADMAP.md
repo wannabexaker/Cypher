@@ -1,64 +1,92 @@
-# Cypher — Roadmap
+# Cypher Roadmap
 
-Phase tracking. Πηγή αλήθειας για το «τι έγινε / τι μένει». Λεπτομέρειες στο [plan 1.md](plan%201.md).
+Updated: 2026-06-30
 
-Legend: `[ ]` todo · `[~]` in progress · `[x]` done
+This file is the source of truth for what is delivered, what is release-blocking, and what comes next. Technical details remain in `docs/plan 1.md`; historical handoff details remain under `docs/codex/`.
 
----
+Legend: `[ ]` todo · `[~]` in progress · `[x]` delivered on the current development line
 
-## Phase 0 — Planning & decisions  ✅
-- [x] Technical plan (`docs/plan 1.md`)
-- [x] Project name: **Cypher**
-- [x] Project `CLAUDE.md` + `cypher-project` skill
-- [x] Decisions locked (2026-06-23):
-  - [x] Ψήφος: **guest-allowed** (fingerprint + IP cap + Turnstile captcha)
-  - [x] Stack: **TS — Next.js 15 + Prisma**
-  - [x] Hosting: **Vercel** (MVP)
-  - [x] Όνομα: **Cypher**
+## Locked product decisions
 
-### Core concept (locked 2026-06-23)
-**Channel = room με join `code`.** Host (account) δημιουργεί → μοιράζει code → members μπαίνουν & ανεβάζουν tracks → host moderates → crowd votes → battle → champion. Δες plan §1b.
+- [x] Hosts require an account: email/password or optional Google OAuth.
+- [x] Guests require only a display name, remembered locally, plus a signed server cookie.
+- [x] Guests can participate but can never host a channel.
+- [x] No email verification in the current MVP.
+- [x] W/L votes lock after the first accepted choice in each vote context.
+- [x] Channels are reusable venues and may run multiple numbered or concurrent contests.
+- [x] Production anti-fraud uses signed identity, HMAC-hashed signals, Turnstile, Upstash sliding windows, IP caps, and database uniqueness.
 
-## Phase 1 — Foundation  ← τρέχουσα
-- [x] `prisma/schema.prisma` (channels + channel_members + submissions + media + votes + battles + audit)
-- [x] Codex orchestration set up (`docs/CODEX_TASKS.md`, `docs/codex/`)
-- [x] **H01** → scaffold + design system + landing page (motion) — ✅ reviewed, 100/100 Lighthouse
-- [x] **H02** → Postgres + `prisma migrate dev` (init) + Auth.js (host accounts) — ✅ reviewed
-- [x] **H03** → Channel create + join-by-code + membership — ✅ reviewed + 🔒 security pass
-- [x] **H01–H03 merged to `main`** (linear) 2026-06-24
-- [x] **H04** → Uploads (presigned) + submissions + host moderation + player — ✅ reviewed + 🔒 security pass + merged (`598e4fc`)
-- [x] **H05** → Participant roles (Judge/Artist) + Moderator promotion — ✅ reviewed + 🔒 security pass + merged (`46cc8a0`)
-- [x] **H01–H05 merged to `main`** (linear, ff-only) 2026-06-24
+## Delivered product foundation
 
-### v1.1 features (locked 2026-06-24 — δες plan §1c)
-Judge/Artist participation · Moderators · Timers (auto-close+extend) · Notifications (in-app + web push).
-- [x] **H06** → Voting (**W/L** per track, live W% split, everyone votes) + anti-fraud — ✅ reviewed + 🔒 security pass + merged (`8b6218a`)
-- [x] **H07** → Timers (auto-close + extend) + live countdown — ✅ reviewed + 🔒 + merged (`0a65a60`)
-- [x] **H08** → Notifications: web push (VAPID + SW) + in-app banners — ✅ reviewed + 🔒 + merged (`b138c52`)
-- [x] **H09** → Results finalization + champion + results-visibility — ✅ reviewed + 🔒 + merged (`1b283c4`). **Single-room MVP loop complete.**
-- [x] **H10** → Battle bracket (single-elimination, W/L per track) — ✅ reviewed + 🔒 + merged (`8cadd72`); **H10.1** bracket-order fix merged (`eb1da90`, `Matchup.position`).
-- [~] **H11** → Stats dashboard — next · **H12** → Hardening (rate limits/CSP/worker + auth)
+- [x] H01 — Next.js scaffold, design system, motion-rich landing page.
+- [x] H02 — PostgreSQL, Prisma migrations, Auth.js host accounts.
+- [x] H03 — Channel creation, host management, join by code, registered and guest membership.
+- [x] H04 — Private MP3/WAV uploads, embeds, moderation, signed playback.
+- [x] H05 — Artist/Judge participation labels and moderator management.
+- [x] H06 — W/L voting, live splits, database dedupe, initial anti-fraud controls.
+- [x] H07 — Host-controlled voting windows and countdown UI.
+- [x] H08 — In-app banners and optional VAPID web push.
+- [x] H09 — Results visibility, finalization, ties, and champion selection.
+- [x] H10/H10.1 — Single-elimination battles and deterministic bracket ordering.
 
-## Phase 2 — Core loop (MVP)
-- [ ] Organizer: create competition + review (approve/reject)
-- [ ] Submission flow (file upload + Spotify/SoundCloud embed)
-- [ ] `<TrackPlayer>` component
-- [ ] Vote pipeline (DB unique → captcha → IP cap → fingerprint)
-- [ ] Public competition page + results
-- [ ] Basic audit log
-- [ ] **MVP shippable**
+## Delivered product evolution
 
-## Phase 3 — Battle + maturity
-- [ ] Battle/bracket system (single-elimination)
-- [ ] Scheduled state transitions (BullMQ)
-- [ ] WAV transcode + virus scan pipeline
-- [ ] Stats dashboard + γραφήματα
-- [ ] Post-hoc fraud detection / recount
-- [ ] UI/UX polish (rap/trap vibe) + responsive
-- [ ] Hardening (rate limits, CSP, load test ψηφοφορίας)
+- [x] H11 — Host stats dashboard and audit-log views.
+- [x] H12 — Immutable-vote UX, explicit W/L labels, results visibility controls.
+- [x] H13/H13.1 — Per-track multi-round voting, who-voted view, result-mode fixes.
+- [x] H14 — Restricted file playback, recent submission reuse, host transfer/delete, retention cron.
+- [x] H15 — YouTube embeds, hydration fix, and push-error surfacing.
+- [x] H16a/H16b — Contest schema and lifecycle; channel-as-venue model.
+- [x] H17 — Top-three podium, rankings, mode standings, and past contests.
+- [x] H18 — Disqualify, kick, audit, and in-room moderation controls.
+- [x] H19 — Safe oEmbed title lookup with SSRF restrictions.
+- [x] H20a/H20b — Concurrent contests, per-contest voting scope, and contest room UI.
+- [x] H21 — Dashboard information architecture and unified contest-start controls.
+- [x] H22/H23 — P1/P2/P3 QA fixes, including hidden-result leaks, guest-vote flags, contest filtering, YouTube rendering, and vote confirmation copy.
 
-## Phase 4+ — Later
-- [ ] Notifications (email/web push), comments/reactions, sharing cards
-- [ ] Multi-round seasons, leaderboards, artist profiles
-- [ ] Real-time live results (WS/SSE)
-- [ ] Admin analytics & moderation tools
+## Delivered stability and security increments
+
+- [x] Concurrent battle votes are scoped to the selected contest and matchup.
+- [x] YouTube CSP and contest notification event wiring are repaired.
+- [x] Vitest unit coverage, Playwright API/browser/mobile coverage, and GitHub Actions are active.
+- [x] Guest display names persist locally without creating guest accounts.
+- [x] Login, registration, join, upload, and vote routes have Upstash sliding-window protection in production.
+- [x] Production guest voting requires FingerprintJS and Turnstile; signed guest identity remains authoritative.
+- [x] File uploads use staging-to-final object promotion, fail-closed remote malware verdicts, and daily orphan cleanup.
+- [x] Latest verified gates: 68 Vitest tests, 11 Playwright scenarios, Prisma validation, typecheck, lint, production build, and dependency audit.
+
+## P0 — Release readiness
+
+- [x] Reconcile operational docs with the implemented codebase.
+- [~] Draft PR #1 publishes the verified post-H23 stability/security line and its CI is green. Human review and merge into remote `main` remain pending.
+- [ ] Provision production PostgreSQL, private R2-compatible storage, Upstash Redis, Turnstile, and the HTTPS malware-scanner service.
+- [ ] Set production secrets: database URLs, `AUTH_SECRET`, storage credentials, Turnstile, Upstash, scanner token, and `CRON_SECRET`.
+- [ ] Apply all committed Prisma migrations in staging/production.
+- [ ] Verify both Vercel crons: channel retention at 03:00 UTC and media maintenance at 03:15 UTC.
+- [ ] Run a staging smoke: host registration/login, room creation, guest join, file upload/scan, moderation, W/L vote, results, battle, sign-out, and retention authorization.
+- [ ] Confirm production logs/alerts for auth failures, rate-limit outages, scanner outages, cron failures, and storage errors.
+
+## P1 — Next product work
+
+Implement in this order after release readiness:
+
+1. [ ] **Explore** — public, opt-in discovery for eligible public rooms/contests; no leakage of unlisted rooms.
+2. [ ] **Profiles** — minimal registered-host/artist pages and public history controls; guests remain local-only identities.
+3. [ ] **Admin** — server-authorized moderation, user/channel lookup, bans, audit access, and operational health views.
+4. [ ] **Realtime** — live vote/result/room updates. Prefer SSE or a managed serverless-compatible transport before introducing WebSockets.
+
+## P2 — Deferred robustness and policy work
+
+- [ ] Expand Playwright coverage for complete file-upload moderation, multi-round track voting, full battle progression, concurrent-contest UI, and destructive host controls.
+- [ ] Add load testing for high-concurrency voting and rate-limit behavior.
+- [ ] Decide whether one browser push endpoint should subscribe to multiple channels; the current unique endpoint is last-channel-wins.
+- [ ] Add password recovery only if host support needs justify the email dependency; email verification remains intentionally out of scope.
+- [ ] Add audio normalization/transcoding if real-world WAV compatibility requires it.
+- [ ] Define registered-user deletion/export policy before profiles store more durable personal data.
+
+## Not planned for the current MVP
+
+- Guest accounts, guest email, or guest login.
+- Mandatory email verification.
+- Redis as the vote source of truth; PostgreSQL remains authoritative.
+- Native mobile apps, marketplace/feed mechanics, or microservices.

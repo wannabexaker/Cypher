@@ -7,30 +7,36 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { VotingCountdown } from "@/components/voting/VotingCountdown";
 
+// H20b: per-contest twin of ChannelTimerControl. Targets the contest-scoped
+// voting-window route added in H20a so each concurrent contest manages its
+// own deadline instead of borrowing the now-legacy channel kill switch.
+
 type TimerAction =
   | { action: "arm"; minutes: number }
   | { action: "extend"; minutes: number }
   | { action: "close" };
 
-type ChannelTimerControlProps = {
-  channelId: string;
-  status: string;
+type ContestTimerControlProps = {
+  channelCode: string;
+  contestId: string;
+  contestStatus: "DRAFT" | "VOTING_OPEN" | "COMPLETED";
   closesAt: string | null;
 };
 
 const ARM_PRESETS = [1, 5, 10, 30] as const;
 const EXTEND_MINUTES = 5;
 
-export function ChannelTimerControl({
-  channelId,
-  status,
+export function ContestTimerControl({
+  channelCode,
+  contestId,
+  contestStatus,
   closesAt,
-}: ChannelTimerControlProps) {
+}: ContestTimerControlProps) {
   const router = useRouter();
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
 
-  const isOpen = status === "OPEN";
+  const isOpen = contestStatus === "VOTING_OPEN" || contestStatus === "DRAFT";
   const hasTimer = Boolean(closesAt);
 
   async function send(body: TimerAction) {
@@ -39,13 +45,18 @@ export function ChannelTimerControl({
     setPending(true);
 
     try {
-      const response = await fetch(`/api/channels/${channelId}/timer`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const response = await fetch(
+        `/api/channels/${channelCode}/contests/${contestId}/voting-window`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
 
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
 
       if (!response.ok) {
         setError(payload.error ?? "Unable to update the voting timer.");
@@ -123,7 +134,7 @@ export function ChannelTimerControl({
 
       {!isOpen && (
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          Open the room to arm a voting timer.
+          This contest is already completed.
         </p>
       )}
 

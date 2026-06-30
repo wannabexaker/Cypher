@@ -24,6 +24,8 @@ export function CreateChannelForm() {
         tagline: formData.get("tagline"),
         genre: formData.get("genre"),
         visibility: formData.get("visibility"),
+        resultsVisibility:
+          formData.get("showResultsLive") === "on" ? "LIVE" : "AFTER_CLOSE",
         description: formData.get("description"),
         rules: formData.get("rules"),
         allowGuestUploads: formData.get("allowGuestUploads") === "on",

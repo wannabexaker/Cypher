@@ -45,6 +45,7 @@ function isSupported(): boolean {
 
 export function PushOptIn({ code, vapidPublicKey }: PushOptInProps) {
   const [status, setStatus] = useState<Status>("loading");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -70,8 +71,14 @@ export function PushOptIn({ code, vapidPublicKey }: PushOptInProps) {
     };
   }, [vapidPublicKey]);
 
+  const failWith = useCallback((message: string) => {
+    setErrorMessage(message);
+    setStatus("error");
+  }, []);
+
   const subscribe = useCallback(async () => {
     setStatus("working");
+    setErrorMessage(null);
     try {
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
@@ -83,12 +90,21 @@ export function PushOptIn({ code, vapidPublicKey }: PushOptInProps) {
       await navigator.serviceWorker.ready;
 
       const existing = await registration.pushManager.getSubscription();
-      const subscription =
-        existing ??
-        (await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-        }));
+      let subscription = existing;
+      if (!subscription) {
+        try {
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+          });
+        } catch (error) {
+          console.error("[push] pushManager.subscribe failed", error);
+          failWith(
+            "Your browser couldn't reach the push service — this usually needs HTTPS or a different browser.",
+          );
+          return;
+        }
+      }
 
       const json = subscription.toJSON();
       const response = await fetch(`/api/channels/${code}/push`, {
@@ -101,17 +117,39 @@ export function PushOptIn({ code, vapidPublicKey }: PushOptInProps) {
       });
 
       if (!response.ok) {
-        setStatus("error");
+        let serverMessage: string | null = null;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          serverMessage = payload?.error ?? null;
+        } catch {
+          // Body wasn't JSON; fall back to status-based message.
+        }
+        console.error(
+          "[push] subscribe POST non-ok",
+          response.status,
+          serverMessage,
+        );
+        if (response.status === 403) {
+          failWith("Join the room before enabling notifications.");
+        } else if (serverMessage) {
+          failWith(serverMessage);
+        } else {
+          failWith(
+            `Couldn't save your subscription (HTTP ${response.status}). Try again.`,
+          );
+        }
         return;
       }
       setStatus("subscribed");
-    } catch {
-      setStatus("error");
+    } catch (error) {
+      console.error("[push] subscribe failed", error);
+      failWith("Something went wrong. Try again.");
     }
-  }, [code, vapidPublicKey]);
+  }, [code, failWith, vapidPublicKey]);
 
   const unsubscribe = useCallback(async () => {
     setStatus("working");
+    setErrorMessage(null);
     try {
       const registration =
         await navigator.serviceWorker.getRegistration("/sw.js");
@@ -126,10 +164,11 @@ export function PushOptIn({ code, vapidPublicKey }: PushOptInProps) {
         await subscription.unsubscribe();
       }
       setStatus("idle");
-    } catch {
-      setStatus("error");
+    } catch (error) {
+      console.error("[push] unsubscribe failed", error);
+      failWith("Something went wrong. Try again.");
     }
-  }, [code]);
+  }, [code, failWith]);
 
   if (status === "loading" || status === "unsupported") {
     return null;
@@ -158,7 +197,7 @@ export function PushOptIn({ code, vapidPublicKey }: PushOptInProps) {
       )}
       {status === "error" && (
         <p className="mt-3 text-sm leading-6 text-magenta">
-          Something went wrong. Try again.
+          {errorMessage ?? "Something went wrong. Try again."}
         </p>
       )}
 

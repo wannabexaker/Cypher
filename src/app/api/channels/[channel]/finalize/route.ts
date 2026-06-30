@@ -1,11 +1,11 @@
-import { ChannelStatus, SubmissionStatus } from "@prisma/client";
+import { ChannelStatus, ContestMode } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { canManageChannel } from "@/lib/channels";
+import { getActiveContest, runLeaderboardFinalize } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { finalizeChannelSchema } from "@/lib/validation/finalize";
-import { compareWinRatio, hasSameWinRatio } from "@/lib/votes";
 
 export const runtime = "nodejs";
 
@@ -13,6 +13,10 @@ type RouteContext = {
   params: Promise<{ channel: string }>;
 };
 
+// H16b: legacy "finalize the room" endpoint is now a thin back-compat wrapper
+// around the active LEADERBOARD contest's finalize. The channel itself stays
+// OPEN as a venue — only the contest closes. UI that issues this call still
+// gets the same tie-break shape.
 export async function POST(request: NextRequest, context: RouteContext) {
   const user = await getCurrentUser();
   if (!user) {
@@ -46,9 +50,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
   }
 
-  // Finalizing freezes the whole room, so it stays host/ADMIN. The owner wanted
-  // host + mods to settle ties — swap this gate to `canModerateChannel` (async)
-  // to let channel MODERATORs finalize as well.
+  // Legacy behaviour stays host/ADMIN; the new /contests/[id]/finalize widens
+  // to include channel MODERATORs.
   if (!canManageChannel(user, channel)) {
     return NextResponse.json(
       { error: "Only the host can finalize this room." },
@@ -63,87 +66,50 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
   }
 
-  const submissions = await prisma.submission.findMany({
-    where: { channelId: channel.id, status: SubmissionStatus.APPROVED },
-    select: { id: true, winCount: true, lossCount: true, createdAt: true },
+  const activeContest = await getActiveContest(
+    prisma,
+    channel.id,
+    ContestMode.LEADERBOARD,
+  );
+  if (!activeContest) {
+    return NextResponse.json(
+      {
+        error:
+          "No active leaderboard contest. Start a contest before finalizing.",
+      },
+      { status: 409 },
+    );
+  }
+
+  const result = await runLeaderboardFinalize(prisma, {
+    contestId: activeContest.id,
+    channelId: channel.id,
+    actorUserId: user.id,
+    championPick: parsed.data.championSubmissionId,
   });
 
-  if (submissions.length === 0) {
+  if (result.kind === "no_approved") {
     return NextResponse.json(
       { error: "No approved tracks to finalize." },
       { status: 409 },
     );
   }
-
-  // Rank by W ratio (highest first); break display order on more votes, then
-  // earlier submission — same ordering the results route uses.
-  const ranked = [...submissions].sort((a, b) => {
-    const ratioOrder = compareWinRatio(b, a);
-    if (ratioOrder !== 0) return ratioOrder;
-    const totalA = a.winCount + a.lossCount;
-    const totalB = b.winCount + b.lossCount;
-    if (totalB !== totalA) return totalB - totalA;
-    return a.createdAt.getTime() - b.createdAt.getTime();
-  });
-
-  const topTier = ranked.filter((submission) =>
-    hasSameWinRatio(submission, ranked[0]),
-  );
-
-  let championSubmissionId: string;
-  let tieBroken = false;
-
-  if (topTier.length > 1) {
-    const tiedSubmissionIds = topTier.map((submission) => submission.id);
-    const pick = parsed.data.championSubmissionId;
-    if (!pick || !tiedSubmissionIds.includes(pick)) {
-      return NextResponse.json(
-        {
-          error: "The top tracks are tied — pick the champion to finalize.",
-          tiedSubmissionIds,
-        },
-        { status: 409 },
-      );
-    }
-    championSubmissionId = pick;
-    tieBroken = true;
-  } else {
-    championSubmissionId = ranked[0].id;
+  if (result.kind === "tie") {
+    return NextResponse.json(
+      {
+        error: "The top tracks are tied — pick the champion to finalize.",
+        tiedSubmissionIds: result.tiedSubmissionIds,
+      },
+      { status: 409 },
+    );
   }
 
-  const now = new Date();
-  const updated = await prisma.$transaction(async (transaction) => {
-    const next = await transaction.channel.update({
-      where: { id: channel.id },
-      data: {
-        status: ChannelStatus.COMPLETED,
-        completedAt: now,
-        championSubmissionId,
-        votingClosesAt: now,
-      },
-      select: {
-        status: true,
-        championSubmissionId: true,
-        completedAt: true,
-      },
-    });
-
-    await transaction.auditLog.create({
-      data: {
-        actorUserId: user.id,
-        action: "channel.finalize",
-        entityType: "channel",
-        entityId: channel.id,
-        metadata: { championSubmissionId, tieBroken },
-      },
-    });
-
-    return next;
-  });
-
+  // Channel-as-venue: room stays OPEN. The legacy response shape keeps the
+  // same field names so existing callers don't break.
   return NextResponse.json({
-    status: updated.status,
-    championSubmissionId: updated.championSubmissionId,
-    completedAt: updated.completedAt,
+    status: ChannelStatus.OPEN,
+    championSubmissionId: result.championSubmissionId,
+    completedAt: result.completedAt,
+    contestId: result.contestId,
   });
 }

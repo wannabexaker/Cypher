@@ -41,7 +41,7 @@ function contentSecurityPolicy(): string {
     `media-src ${mediaSrc.join(" ")}`,
     `connect-src ${connectSrc.join(" ")}`,
     `font-src 'self' data:`,
-    `frame-src https://open.spotify.com https://w.soundcloud.com ${turnstileOrigin}`,
+    `frame-src https://open.spotify.com https://w.soundcloud.com https://www.youtube.com https://www.youtube-nocookie.com ${turnstileOrigin}`,
   ];
 
   return directives.join("; ");

@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, Music2, Play, TriangleAlert } from "lucide-react";
+import { Lock, LoaderCircle, Music2, Play, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,9 @@ type TrackPlayerProps = {
   externalUrl?: string | null;
   trackTitle: string;
   artistName: string;
+  // H14: only host/ADMIN, channel MODERATORs, and the uploader may play FILE
+  // tracks. Embeds (Spotify/SoundCloud) are public and ignore this flag.
+  canPlayFile?: boolean;
 };
 
 const IFRAME_SANDBOX = "allow-scripts allow-same-origin allow-popups allow-presentation";
@@ -84,6 +87,7 @@ export function TrackPlayer({
   externalUrl,
   trackTitle,
   artistName,
+  canPlayFile = true,
 }: TrackPlayerProps) {
   const title = `${artistName} — ${trackTitle}`;
 
@@ -93,6 +97,14 @@ export function TrackPlayer({
         <p className="mt-4 inline-flex items-center gap-2 text-sm text-muted-foreground">
           <TriangleAlert className="size-4" />
           Audio is unavailable.
+        </p>
+      );
+    }
+    if (!canPlayFile) {
+      return (
+        <p className="mt-4 inline-flex items-center gap-2 rounded-md border border-border bg-background/60 px-3 py-2 text-sm text-muted-foreground">
+          <Lock className="size-4 text-magenta" aria-hidden="true" />
+          Only the host, moderators, and the artist can play uploaded tracks.
         </p>
       );
     }
@@ -111,23 +123,64 @@ export function TrackPlayer({
   }
 
   const isSpotify = sourceType === "SPOTIFY";
+  const isYouTube = sourceType === "YOUTUBE";
+  const providerLabel = isSpotify
+    ? "Spotify"
+    : isYouTube
+      ? "YouTube"
+      : "SoundCloud";
 
   return (
     <div className="mt-4 overflow-hidden rounded-lg border border-border bg-background">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
         <Music2 className="size-3.5 text-magenta" />
-        {isSpotify ? "Spotify" : "SoundCloud"}
+        {providerLabel}
       </div>
-      <iframe
-        title={title}
-        src={embedUrl}
-        loading="lazy"
-        sandbox={IFRAME_SANDBOX}
-        allow="encrypted-media; clipboard-write; picture-in-picture"
-        className="w-full"
-        height={isSpotify ? 152 : 166}
-        style={{ border: 0 }}
-      />
+      {isYouTube ? (
+        /*
+          H23 P2.4: YouTube embed kept appearing as a blank gray box while
+          Spotify/SoundCloud played fine. Two changes vs the original 16:9
+          wrapper:
+            1. Switch from inline `aspectRatio` to the classic
+               `padding-bottom: 56.25%` responsive trick. The aspect-ratio
+               CSS property can race with `loading="lazy"` — the iframe is
+               measured as 0×0 before the property resolves, so the lazy
+               loader can skip it.
+            2. Drop `loading="lazy"` on the YouTube branch (Spotify keeps
+               it because it uses a fixed pixel height) and add
+               `referrerPolicy="origin-when-cross-origin"` so the YT player
+               can phone home for the videos that require a non-empty
+               referer to play.
+          The sandbox/allow list is unchanged — it already permits the
+          player to run.
+        */
+        <div
+          className="relative w-full"
+          style={{ paddingBottom: "56.25%" }}
+        >
+          <iframe
+            title={title}
+            src={embedUrl}
+            sandbox={IFRAME_SANDBOX}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            referrerPolicy="origin-when-cross-origin"
+            className="absolute inset-0 h-full w-full"
+            style={{ border: 0 }}
+          />
+        </div>
+      ) : (
+        <iframe
+          title={title}
+          src={embedUrl}
+          loading="lazy"
+          sandbox={IFRAME_SANDBOX}
+          allow="encrypted-media; clipboard-write; picture-in-picture"
+          className="w-full"
+          height={isSpotify ? 152 : 166}
+          style={{ border: 0 }}
+        />
+      )}
     </div>
   );
 }

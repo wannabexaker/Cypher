@@ -2,10 +2,14 @@
 
 import { Check, Gavel, LoaderCircle, LogIn, Mic2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  readGuestDisplayName,
+  storeGuestDisplayName,
+} from "@/lib/guest-profile";
 import { cn } from "@/lib/utils";
 
 type Participation = "ARTIST" | "JUDGE";
@@ -94,6 +98,13 @@ export function JoinRoomPanel({
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [choice, setChoice] = useState<Participation | "">("");
+  const [guestDisplayName, setGuestDisplayName] = useState("");
+
+  useEffect(() => {
+    if (!authenticated) {
+      setGuestDisplayName(readGuestDisplayName() ?? "");
+    }
+  }, [authenticated]);
 
   async function join(displayName?: string) {
     if (!choice) {
@@ -119,6 +130,10 @@ export function JoinRoomPanel({
     if (!response.ok) {
       setError(payload.error ?? "Unable to join the room.");
       return;
+    }
+
+    if (displayName) {
+      storeGuestDisplayName(displayName);
     }
 
     router.refresh();
@@ -259,7 +274,13 @@ export function JoinRoomPanel({
         minLength={2}
         maxLength={30}
         placeholder="Night Shift"
+        value={guestDisplayName}
+        onChange={(event) => setGuestDisplayName(event.target.value)}
+        aria-describedby="display-name-help"
       />
+      <p id="display-name-help" className="mt-2 text-xs text-muted-foreground">
+        Saved only on this device for your next room.
+      </p>
       <ParticipationChoice
         value={choice}
         onChange={setChoice}

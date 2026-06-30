@@ -8,6 +8,11 @@ import {
   readGuestToken,
 } from "@/lib/guest-session";
 import { prisma } from "@/lib/prisma";
+import {
+  enforceRequestRateLimit,
+  RateLimitExceededError,
+  RateLimitUnavailableError,
+} from "@/lib/rate-limit";
 import { getCurrentUser } from "@/lib/session";
 import {
   channelCodeSchema,
@@ -25,6 +30,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const parsedCode = channelCodeSchema.safeParse(rawCode);
   if (!parsedCode.success) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
+  }
+
+  try {
+    await enforceRequestRateLimit("join-ip", request);
+  } catch (error) {
+    if (error instanceof RateLimitExceededError) {
+      return NextResponse.json(
+        { error: "Too many join attempts. Try again shortly." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(error.retryAfterSeconds) },
+        },
+      );
+    }
+    if (error instanceof RateLimitUnavailableError) {
+      return NextResponse.json(
+        { error: "Join protection is temporarily unavailable." },
+        { status: 503 },
+      );
+    }
+    throw error;
   }
 
   let body: unknown = {};

@@ -3,6 +3,13 @@ import { NextResponse } from "next/server";
 
 import { hashPassword } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
+import {
+  enforceRequestRateLimit,
+  RateLimitExceededError,
+  RateLimitUnavailableError,
+} from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/request";
+import { verifyTurnstile } from "@/lib/turnstile";
 import { registerSchema } from "@/lib/validation/auth";
 
 export const runtime = "nodejs";
@@ -12,6 +19,21 @@ const genericError = {
 };
 
 export async function POST(request: Request) {
+  try {
+    await enforceRequestRateLimit("register-ip", request);
+  } catch (error) {
+    if (error instanceof RateLimitExceededError) {
+      return NextResponse.json(genericError, {
+        status: 429,
+        headers: { "Retry-After": String(error.retryAfterSeconds) },
+      });
+    }
+    if (error instanceof RateLimitUnavailableError) {
+      return NextResponse.json(genericError, { status: 503 });
+    }
+    throw error;
+  }
+
   let body: unknown;
 
   try {
@@ -23,6 +45,15 @@ export async function POST(request: Request) {
   const parsed = registerSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(genericError, { status: 400 });
+  }
+
+  if (
+    !(await verifyTurnstile({
+      token: parsed.data.turnstileToken,
+      remoteIp: getClientIp(request) ?? undefined,
+    }))
+  ) {
+    return NextResponse.json(genericError, { status: 403 });
   }
 
   try {

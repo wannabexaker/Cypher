@@ -9,6 +9,11 @@ import {
   verifyPassword,
 } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
+import {
+  enforceRateLimit,
+  enforceRequestRateLimit,
+  hashRateLimitIdentifier,
+} from "@/lib/rate-limit";
 import { loginSchema } from "@/lib/validation/auth";
 
 export const googleAuthEnabled = Boolean(
@@ -21,9 +26,23 @@ const providers: NextAuthConfig["providers"] = [
       email: { label: "Email", type: "email" },
       password: { label: "Password", type: "password" },
     },
-    async authorize(credentials) {
+    async authorize(credentials, request) {
       const parsed = loginSchema.safeParse(credentials);
       if (!parsed.success) return null;
+
+      try {
+        await Promise.all([
+          enforceRequestRateLimit("login-ip", request),
+          enforceRateLimit(
+            "login-account",
+            hashRateLimitIdentifier(parsed.data.email),
+          ),
+        ]);
+      } catch {
+        // Credentials auth intentionally returns one generic failure for bad
+        // credentials, throttled attempts, and unavailable security controls.
+        return null;
+      }
 
       const user = await prisma.user.findUnique({
         where: { email: parsed.data.email },

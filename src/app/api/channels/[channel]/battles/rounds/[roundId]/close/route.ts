@@ -1,12 +1,13 @@
 import {
-  ChannelStatus,
+  ContestStatus,
   MatchupStatus,
   Prisma,
   RoundStatus,
 } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { canManageChannel } from "@/lib/channels";
+import { canManageChannel, resolveChannelByParam } from "@/lib/channels";
+import { bumpChannelActivity } from "@/lib/contests";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { closeBattleRoundSchema } from "@/lib/validation/battle";
@@ -51,9 +52,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Invalid round close details." }, { status: 400 });
   }
 
-  const channel = await prisma.channel.findUnique({
-    where: { id: channelId },
-    select: { id: true, hostId: true, status: true },
+  const channel = await resolveChannelByParam(prisma, channelId, {
+    id: true,
+    hostId: true,
+    status: true,
   });
   if (!channel) {
     return NextResponse.json({ error: "Channel not found." }, { status: 404 });
@@ -64,12 +66,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
       { status: 403 },
     );
   }
-  if (channel.status !== ChannelStatus.BATTLE) {
-    return NextResponse.json(
-      { error: "Battle rounds can only close while the room is in battle mode." },
-      { status: 409 },
-    );
-  }
+  // H20a: channel.status no longer gates battle round closes — the channel
+  // stays OPEN, "battle-ness" lives on the Contest/BattleRound. We still
+  // enforce that the *round* is open below.
 
   const round = await prisma.battleRound.findUnique({
     where: { id: roundId },
@@ -78,6 +77,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       channelId: true,
       roundNumber: true,
       status: true,
+      contestId: true,
       matchups: {
         orderBy: { position: "asc" },
         select: {
@@ -224,20 +224,33 @@ export async function POST(request: NextRequest, context: RouteContext) {
         if (winners.length === 1) {
           championSubmissionId = winners[0];
           completed = true;
+          // H20a: channel stays OPEN forever — no more channel.status flips
+          // on bracket completion (or on contest create). The bracket's
+          // outcome lives entirely on the Contest row. We still bump the
+          // activity clock so the cron purge knows the room is alive.
           await transaction.channel.update({
             where: { id: channel.id },
-            data: {
-              championSubmissionId,
-              status: ChannelStatus.COMPLETED,
-              completedAt: now,
-            },
+            data: { lastActivityAt: now },
           });
+          // H16a: the battle contest is over — mark it COMPLETED and stamp
+          // the champion so contest reads carry the final state.
+          if (round.contestId) {
+            await transaction.contest.update({
+              where: { id: round.contestId },
+              data: {
+                status: ContestStatus.COMPLETED,
+                completedAt: now,
+                championSubmissionId,
+              },
+            });
+          }
         } else {
           const next = await transaction.battleRound.create({
             data: {
               channelId: channel.id,
               roundNumber: round.roundNumber + 1,
               status: RoundStatus.VOTING_OPEN,
+              contestId: round.contestId,
             },
             select: { id: true },
           });
@@ -281,6 +294,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+
+    // H16a: closing a battle round (success or progression) means the room
+    // is alive — bump activity outside the transaction.
+    await bumpChannelActivity(prisma, channel.id);
 
     return NextResponse.json(result);
   } catch (error) {

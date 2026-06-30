@@ -6,6 +6,7 @@ import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { getBrowserFingerprint } from "@/lib/fingerprint";
 import { cn } from "@/lib/utils";
 import { getVoteSplit } from "@/lib/votes";
 
@@ -47,13 +48,17 @@ type VoteControlProps = {
   countsHiddenLabel?: string;
   votePath?: string;
   extraPayload?: Record<string, string>;
+  contestId?: string;
+  fingerprintRequired?: boolean;
 };
 
 type VoteResponse = {
   error?: string;
+  code?: string;
   winCount?: number;
   lossCount?: number;
   yourChoice?: VoteChoice;
+  locked?: boolean;
 };
 
 export function VoteControl({
@@ -69,19 +74,53 @@ export function VoteControl({
   countsHiddenLabel,
   votePath,
   extraPayload,
+  contestId,
+  fingerprintRequired = false,
 }: VoteControlProps) {
   const reduceMotion = useReducedMotion();
   const [winCount, setWinCount] = useState(initialWinCount);
   const [lossCount, setLossCount] = useState(initialLossCount);
   const [choice, setChoice] = useState<VoteChoice | undefined>(initialChoice);
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState("");
+  // H23 P3.6: single source of truth for the "You voted W/L." confirmation.
+  // Previously we rendered it twice — once via aria-live (set after cast) and
+  // once via a {voteLocked && <p>…} block — which both visually duplicated
+  // the line and announced it twice to screen readers. Seed `message` from
+  // `initialChoice` so the confirmation persists across page refreshes.
+  const [message, setMessage] = useState(
+    initialChoice
+      ? `You voted ${initialChoice === "WIN" ? "W" : "L"}.`
+      : "",
+  );
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [fingerprint, setFingerprint] = useState("");
+  const [fingerprintFailed, setFingerprintFailed] = useState(false);
   const turnstileContainerRef = useRef<HTMLDivElement>(null);
   const turnstileWidgetRef = useRef<string | null>(null);
 
   const { total, winPct, lossPct } = getVoteSplit({ winCount, lossCount });
   const needsTurnstile = Boolean(turnstileSiteKey);
+  const voteLocked = Boolean(choice);
+  const needsFingerprint = fingerprintRequired && canVote && !voteLocked;
+
+  useEffect(() => {
+    if (!needsFingerprint) return;
+
+    let active = true;
+    setFingerprintFailed(false);
+
+    void getBrowserFingerprint()
+      .then((visitorId) => {
+        if (active) setFingerprint(visitorId);
+      })
+      .catch(() => {
+        if (active) setFingerprintFailed(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [needsFingerprint]);
 
   function renderTurnstile() {
     if (
@@ -123,7 +162,8 @@ export function VoteControl({
     if (
       !canVote ||
       pending ||
-      choice === nextChoice ||
+      voteLocked ||
+      (needsFingerprint && !fingerprint) ||
       (needsTurnstile && !turnstileToken)
     ) {
       return;
@@ -139,7 +179,9 @@ export function VoteControl({
         body: JSON.stringify({
           submissionId,
           choice: nextChoice,
+          ...(contestId ? { contestId } : {}),
           ...(extraPayload ?? {}),
+          ...(fingerprint ? { fingerprint } : {}),
           ...(turnstileToken ? { turnstileToken } : {}),
         }),
       });
@@ -151,6 +193,15 @@ export function VoteControl({
         payload.lossCount === undefined ||
         !payload.yourChoice
       ) {
+        // H20b: surface the "pick a contest" prompt explicitly so the user
+        // doesn't get the generic error text when the room has multiple
+        // active leaderboard contests and the caller didn't pass a contestId.
+        if (payload.code === "CONTEST_REQUIRED") {
+          setMessage(
+            "Open a specific contest to vote — multiple contests are running here.",
+          );
+          return;
+        }
         setMessage(payload.error ?? "Unable to record your vote.");
         return;
       }
@@ -158,11 +209,7 @@ export function VoteControl({
       setWinCount(payload.winCount);
       setLossCount(payload.lossCount);
       setChoice(payload.yourChoice);
-      setMessage(
-        choice && choice !== payload.yourChoice
-          ? `Vote flipped to ${payload.yourChoice === "WIN" ? "W" : "L"}.`
-          : "Vote locked.",
-      );
+      setMessage(`You voted ${payload.yourChoice === "WIN" ? "W" : "L"}.`);
     } catch {
       setMessage("Unable to record your vote.");
     } finally {
@@ -237,21 +284,23 @@ export function VoteControl({
         <Button
           type="button"
           variant={choice === "WIN" ? "lime" : "outline"}
+          aria-label="Vote Win"
           aria-pressed={choice === "WIN"}
           disabled={
             !canVote ||
             pending ||
-            choice === "WIN" ||
+            voteLocked ||
+            (needsFingerprint && !fingerprint) ||
             (needsTurnstile && !turnstileToken)
           }
           onClick={() => void cast("WIN")}
         >
           {pending ? <LoaderCircle className="motion-safe:animate-spin" /> : "W"}
-          Win
         </Button>
         <Button
           type="button"
           variant="outline"
+          aria-label="Vote Loss"
           aria-pressed={choice === "LOSS"}
           className={cn(
             choice === "LOSS" &&
@@ -260,15 +309,32 @@ export function VoteControl({
           disabled={
             !canVote ||
             pending ||
-            choice === "LOSS" ||
+            voteLocked ||
+            (needsFingerprint && !fingerprint) ||
             (needsTurnstile && !turnstileToken)
           }
           onClick={() => void cast("LOSS")}
         >
           {pending ? <LoaderCircle className="motion-safe:animate-spin" /> : "L"}
-          Loss
         </Button>
       </div>
+
+      {needsFingerprint && (
+        <p
+          role="status"
+          className={cn(
+            "mt-3 inline-flex items-center gap-2 text-xs",
+            fingerprintFailed ? "text-magenta" : "text-muted-foreground",
+          )}
+        >
+          <ShieldCheck className="size-3.5 text-cyan" aria-hidden="true" />
+          {fingerprintFailed
+            ? "Device check unavailable. Refresh or sign in to vote."
+            : fingerprint
+              ? "Device check ready."
+              : "Checking this device..."}
+        </p>
+      )}
 
       {turnstileSiteKey && canVote && (
         <>
