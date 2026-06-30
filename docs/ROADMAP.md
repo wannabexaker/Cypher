@@ -58,7 +58,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` delivered on the current develo
 ## P0 — Release readiness
 
 - [x] Reconcile operational docs with the implemented codebase.
-- [ ] Merge the current post-H23 stability/security line into `main` through a reviewed PR and run CI there.
+- [~] Local `main` now contains the verified post-H23 stability/security line. Remote push/review and CI on `main` remain pending.
 - [ ] Provision production PostgreSQL, private R2-compatible storage, Upstash Redis, Turnstile, and the HTTPS malware-scanner service.
 - [ ] Set production secrets: database URLs, `AUTH_SECRET`, storage credentials, Turnstile, Upstash, scanner token, and `CRON_SECRET`.
 - [ ] Apply all committed Prisma migrations in staging/production.
