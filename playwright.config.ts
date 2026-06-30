@@ -50,6 +50,8 @@ export default defineConfig({
           ...process.env,
           AUTH_URL: baseURL,
           NEXTAUTH_URL: baseURL,
+          CRON_SECRET:
+            process.env.CRON_SECRET || "local-e2e-cron-secret",
         },
       },
   projects: [

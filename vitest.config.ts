@@ -22,8 +22,10 @@ export default defineConfig({
       reportsDirectory: "./coverage",
       include: [
         "src/lib/channel-code.ts",
+        "src/lib/cron.ts",
         "src/lib/embeds.ts",
         "src/lib/guest-profile.ts",
+        "src/lib/malware-scan.ts",
         "src/lib/rate-limit.ts",
         "src/lib/request.ts",
         "src/lib/turnstile.ts",

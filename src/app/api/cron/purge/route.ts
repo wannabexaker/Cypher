@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { isCronAuthorized } from "@/lib/cron";
 import { prisma } from "@/lib/prisma";
 import { deleteObject } from "@/lib/storage";
 
@@ -10,17 +11,10 @@ export const runtime = "nodejs";
 // days (lastActivityAt < now - 15d) get their MinIO objects wiped first,
 // then the row cascade-deletes the rest. No always-on worker — purely
 // scheduled.
-function authorized(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const header = request.headers.get("authorization");
-  return header === `Bearer ${secret}`;
-}
-
 // H13.1: Vercel Cron Jobs invoke the path with a GET request (not POST), so
 // the handler must be exported as GET or the daily sweep would 405.
 export async function GET(request: Request) {
-  if (!authorized(request)) {
+  if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: "Not authorized." }, { status: 401 });
   }
 

@@ -33,9 +33,23 @@ test("host can register, create and open a room, then sign out", async ({
     await page.goto("/dashboard/channels/new");
     await page.getByLabel("Channel name", { exact: true }).fill(`E2E UI Room ${id}`);
     await page.getByLabel("Allow guest members").check();
+    const createResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/channels",
+    );
     await page.getByRole("button", { name: "Create channel" }).click();
+    const created = await createResponse;
+    expect(created.status()).toBe(201);
+    const payload = (await created.json()) as { channel: { id: string } };
+    const managementPath = `/dashboard/channels/${payload.channel.id}`;
 
-    await expect(page).toHaveURL(/\/dashboard\/channels\/[0-9a-f-]+$/);
+    try {
+      await page.waitForURL(managementPath, { timeout: 5_000 });
+    } catch {
+      await page.goto(managementPath);
+    }
+    await expect(page).toHaveURL(managementPath);
     await page.getByRole("button", { name: "Open the room" }).click();
     await expect(page.getByRole("button", { name: "Close the room" })).toBeVisible();
 

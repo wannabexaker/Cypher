@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/purge",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/media-maintenance",
+      "schedule": "15 3 * * *"
     }
   ]
 }

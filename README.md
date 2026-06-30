@@ -10,10 +10,11 @@ Cypher runs music competitions as rooms ("channels"). A host opens a channel and
 
 - Channels with shareable six-character join codes; join as a registered user or a guest (name only, via a signed httpOnly cookie)
 - Participation roles per channel: Artist (submits a track), Judge (votes), plus host-granted Moderators
-- Audio submissions by presigned upload (MP3/WAV, verified by magic bytes) or SoundCloud/Spotify embed, with host approve/reject moderation
+- Audio submissions by presigned upload (MP3/WAV, verified by magic bytes and a production malware scanner) or SoundCloud/Spotify embed, with host approve/reject moderation
 - Win/Loss voting per track with a live W%/L% split; one vote per identity per track, changeable until voting closes
 - Anti-fraud vote pipeline: signed user/guest identity, HMAC-hashed IP and fingerprint signals, a unique `dedupeKey` enforced by the database, a per-IP cap, production-required Cloudflare Turnstile, and a serializable write
 - Production abuse controls: FingerprintJS guest signals, mandatory Turnstile checks, and Upstash Redis sliding-window limits on login, registration, joins, uploads, and voting
+- Media hardening: fail-closed remote malware verdicts before a file can be submitted or played, plus daily cleanup of stale unlinked uploads and storage orphans
 - Host-armed voting window: arm/extend/close a deadline with a live countdown; votes lock at the deadline
 - Web push notifications (VAPID + service worker) and in-app banners on voting events
 - Results finalization with a crowned champion, host tie-break, and per-channel results visibility (`LIVE`, `AFTER_CLOSE`, `HIDDEN`)
@@ -73,7 +74,7 @@ docker compose up -d
 pnpm db:migrate
 ```
 
-Required env vars are `DATABASE_URL`, `DIRECT_URL`, `AUTH_SECRET`, and the `S3_*` group (defaults match the Docker MinIO service). Production also requires both `TURNSTILE_*` keys and `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`; protected mutations fail closed when these controls are unavailable. They remain optional during local development and tests. `VAPID_*`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, and `AUTH_GOOGLE_*` are optional; `VOTE_IP_CAP` defaults to 40.
+Required env vars are `DATABASE_URL`, `DIRECT_URL`, `AUTH_SECRET`, and the `S3_*` group (defaults match the Docker MinIO service). Production also requires both `TURNSTILE_*` keys, `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`, and `MALWARE_SCAN_URL` / `MALWARE_SCAN_TOKEN`; protected mutations fail closed when these controls are unavailable. The malware endpoint receives a short-lived signed media URL and must return JSON with a `clean` or `infected` verdict. These controls remain optional during local development and tests. `VAPID_*`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, and `AUTH_GOOGLE_*` are optional; `VOTE_IP_CAP` defaults to 40.
 
 ## Usage
 
@@ -145,5 +146,7 @@ Cypher/
 
 - PostgreSQL is authoritative for votes. The unique constraint on `Vote.dedupeKey` (namespaced per submission or per matchup, keyed by user id or the signed guest token) is the final guard against double voting; fingerprint and IP are supplemental abuse signals, since NAT and mobile networks share addresses.
 - IP and fingerprint are stored only as HMAC hashes, never raw.
+- Uploaded files cannot be approved or streamed unless `MediaAsset.scanStatus` is `CLEAN`. Production obtains that verdict from the configured HTTPS scanner; local/test uses magic-byte validation as an explicit development fallback.
+- `/api/cron/media-maintenance` removes unlinked asset rows and DB-less `media/` objects after `MEDIA_ORPHAN_TTL_HOURS` (24 by default). It uses the same bearer `CRON_SECRET` as channel retention.
 - Turnstile and Upstash rate limiting may be omitted only in development/tests. Production guest votes and registration require Turnstile, while protected mutations require Upstash. Web push remains optional and becomes a no-op when VAPID keys are unset.
 - The Docker Compose PostgreSQL maps to host port `5434` to avoid colliding with a local `5432`; the committed `.env.example` default uses `5432`, so align `DATABASE_URL` with whichever you run.

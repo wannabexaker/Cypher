@@ -9,7 +9,7 @@ import {
   RateLimitExceededError,
   RateLimitUnavailableError,
 } from "@/lib/rate-limit";
-import { buildStorageKey, createUploadUrl } from "@/lib/storage";
+import { buildUploadStorageKey, createUploadUrl } from "@/lib/storage";
 import { signUploadSchema } from "@/lib/validation/submissions";
 
 export const runtime = "nodejs";
@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const storageKey = buildStorageKey(mimeType);
+  const storageKey = buildUploadStorageKey(mimeType);
 
   let uploadUrl: string;
   try {

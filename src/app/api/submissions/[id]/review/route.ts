@@ -47,6 +47,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       status: true,
       channelId: true,
       channel: { select: { hostId: true } },
+      mediaAsset: { select: { scanStatus: true } },
     },
   });
 
@@ -74,6 +75,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   const approved = parsed.data.decision === "APPROVE";
+  if (approved && submission.mediaAsset?.scanStatus !== undefined) {
+    if (submission.mediaAsset.scanStatus !== "CLEAN") {
+      return NextResponse.json(
+        { error: "This upload has not passed its security scan." },
+        { status: 409 },
+      );
+    }
+  }
   const nextStatus = approved
     ? SubmissionStatus.APPROVED
     : SubmissionStatus.REJECTED;

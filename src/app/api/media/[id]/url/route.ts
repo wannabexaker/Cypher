@@ -27,6 +27,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       id: true,
       storageKey: true,
       mimeType: true,
+      scanStatus: true,
       originalFilename: true,
       ownerUserId: true,
       submission: {
@@ -78,6 +79,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
   if (!authorized) {
     return noStore({ error: "Not allowed." }, { status: 403 });
+  }
+
+  if (asset.scanStatus !== "CLEAN") {
+    return noStore(
+      { error: "Media is unavailable until its security scan passes." },
+      { status: asset.scanStatus === "INFECTED" ? 410 : 423 },
+    );
   }
 
   let url: string;
