@@ -52,7 +52,7 @@ Legend: `[ ]` queued · `[~]` in progress · `[x]` delivered on the current deve
 
 | Priority | ID | Scope | Status | Exit condition |
 |---|---|---|---|---|
-| P0 | R01 | Integrate current development line into `main` | `[~]` | Local fast-forward is complete; remote review/push and green CI remain |
+| P0 | R01 | Integrate current development line into `main` | `[~]` | Draft PR #1 is open with green CI; human review and merge remain |
 | P0 | R02 | Production provider/secrets setup | `[ ]` | Postgres, private storage, Upstash, Turnstile, scanner, cron secret configured |
 | P0 | R03 | Staging migration and complete smoke | `[ ]` | Core host/guest/upload/vote/result/battle journey passes against production-like services |
 | P0 | R04 | Operational alerts and cron verification | `[ ]` | Failures are visible and both scheduled jobs are observed succeeding |
