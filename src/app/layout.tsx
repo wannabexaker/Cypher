@@ -19,18 +19,29 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://cypher.example"),
+  metadataBase: new URL("https://cypher.olamov.com"),
+  applicationName: "Cypher",
   title: {
     default: "Cypher — Drop your bars. The crowd decides.",
     template: "%s | Cypher",
   },
   description:
-    "Create a channel, share the code, drop tracks, and let the crowd crown the champion.",
-  keywords: ["rap battles", "music competitions", "cypher", "trap", "drill"],
+    "Host a room, share the code, drop tracks, and let the crowd vote a champion. Online rap & trap competitions — ranked leaderboards and battle brackets.",
+  keywords: [
+    "rap battles",
+    "music competitions",
+    "cypher",
+    "trap",
+    "drill",
+    "beat battles",
+    "online rap contest",
+  ],
   openGraph: {
     title: "Cypher — The crowd decides.",
     description:
-      "Online rap and trap competitions built for artists, hosts, and the crowd.",
+      "Host a room, share the code, drop tracks, and let the crowd vote a champion.",
+    url: "https://cypher.olamov.com",
+    siteName: "Cypher",
     type: "website",
     locale: "en_US",
   },

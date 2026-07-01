@@ -100,6 +100,25 @@ export default async function DashboardPage() {
             <Plus />
             Create a channel
           </Link>
+
+          <div className="mt-9 grid w-full max-w-2xl gap-3 sm:grid-cols-3">
+            {[
+              { n: "1", t: "Create a room", d: "Name it and get a code to share." },
+              { n: "2", t: "Collect tracks", d: "Artists join and submit; you approve them." },
+              { n: "3", t: "Run a contest", d: "Open a leaderboard or battle — the crowd votes." },
+            ].map((step) => (
+              <div
+                key={step.n}
+                className="rounded-lg border border-border bg-background/50 p-4 text-left"
+              >
+                <span className="font-mono text-[0.625rem] font-bold tracking-[0.14em] text-primary-glow uppercase">
+                  Step {step.n}
+                </span>
+                <p className="mt-2 font-bold text-foreground">{step.t}</p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">{step.d}</p>
+              </div>
+            ))}
+          </div>
         </section>
       ) : (
         <section className="mt-8" aria-labelledby="your-channels">
