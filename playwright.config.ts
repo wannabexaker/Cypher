@@ -20,13 +20,18 @@ export default defineConfig({
   globalSetup: "./tests/support/global-setup.ts",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
-  retries: process.env.CI ? 2 : 0,
+  // A cold Turbopack compile can overrun a slow dev host's first attempt; the
+  // retry then runs against warm routes and passes. CI keeps 2 for infra noise.
+  retries: process.env.CI ? 2 : 1,
   // Keep database-backed journeys serialized locally and in CI. This avoids
   // cold Next.js compilations competing for CPU and makes fixture cleanup
   // deterministic.
   workers: 1,
-  timeout: 90_000,
-  expect: { timeout: 15_000 },
+  // Generous budgets for dev-mode journeys: even after warmup, a slow host still
+  // pays incremental Turbopack compiles + argon2 + DB round-trips per step. CI on
+  // Linux is well under these; they only prevent false failures on slow dev hosts.
+  timeout: 180_000,
+  expect: { timeout: 45_000 },
   outputDir: ".artifacts/playwright",
   reporter: process.env.CI
     ? [["github"], ["html", { outputFolder: ".artifacts/playwright-report", open: "never" }]]
@@ -56,17 +61,26 @@ export default defineConfig({
       },
   projects: [
     {
+      // Warms lazy-compiled dev routes once, up front, so the browser journeys
+      // below don't each eat a cold Turbopack compile and time out.
+      // See tests/support/warmup.setup.ts.
+      name: "setup",
+      testMatch: /support\/warmup\.setup\.ts$/,
+    },
+    {
       name: "api",
       testMatch: /api\/.*\.spec\.ts/,
     },
     {
       name: "chromium",
       testMatch: /e2e\/[^/]+\.spec\.ts/,
+      dependencies: ["setup"],
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile",
       testMatch: /mobile\/.*\.spec\.ts/,
+      dependencies: ["setup"],
       use: { ...devices["Pixel 5"] },
     },
   ],
