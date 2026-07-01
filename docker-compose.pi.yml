@@ -23,7 +23,20 @@ services:
   app:
     ports:
       - "127.0.0.1:3001:3000" # host cloudflared -> cypher.<domain>
+    # The app resolves its own public S3_ENDPOINT host (media presign/head/list
+    # hairpins to MinIO through the tunnel). Use public resolvers so it does not
+    # depend on the host's resolver (e.g. Tailscale MagicDNS may not have the
+    # just-created record). Docker service names still resolve via 127.0.0.11.
+    dns:
+      - "1.1.1.1"
+      - "1.0.0.1"
 
   minio:
     ports:
       - "127.0.0.1:9000:9000" # host cloudflared -> media.<domain> (presigned URLs)
+
+  scanner:
+    # Fetches presigned download URLs at the public S3_ENDPOINT host.
+    dns:
+      - "1.1.1.1"
+      - "1.0.0.1"
