@@ -2,8 +2,9 @@ import { Camera, Music2, Video } from "lucide-react";
 
 const footerLinks = [
   { label: "How it works", href: "#how-it-works" },
-  { label: "Live channels", href: "#live-channels" },
+  { label: "Formats", href: "#modes" },
   { label: "Battles", href: "#battles" },
+  { label: "Guide", href: "#guide" },
 ] as const;
 
 const socialLinks = [

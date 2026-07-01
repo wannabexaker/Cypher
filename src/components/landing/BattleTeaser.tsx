@@ -1,21 +1,14 @@
 "use client";
 
 import { motion, useReducedMotion } from "framer-motion";
-import { Crown, Radio, Trophy } from "lucide-react";
+import { Crown, Radio } from "lucide-react";
 
 import { Reveal } from "@/components/motion/Reveal";
 import { SectionHeading } from "@/components/landing/SectionHeading";
-import { bracket } from "@/lib/mock";
+import { exampleBracket, type ExampleSlot } from "@/lib/landing";
 import { cn } from "@/lib/utils";
 
-type Slot = {
-  artist: string;
-  seed: string;
-  score: number;
-  winner: boolean;
-};
-
-function BracketSlot({ slot, final = false }: { slot: Slot; final?: boolean }) {
+function BracketSlot({ slot, final = false }: { slot: ExampleSlot; final?: boolean }) {
   return (
     <div
       className={cn(
@@ -27,25 +20,26 @@ function BracketSlot({ slot, final = false }: { slot: Slot; final?: boolean }) {
           : "border-border",
       )}
     >
-      <span className="font-mono text-[0.6875rem] text-muted-foreground">{slot.seed}</span>
-      <span className="flex-1 font-bold text-foreground">{slot.artist}</span>
-      <span
-        className={cn(
-          "display-text text-xl",
-          slot.winner ? (final ? "text-gold" : "text-primary-glow") : "text-muted-foreground",
-        )}
-      >
-        {slot.score}
-      </span>
+      <span className="flex-1 font-bold text-foreground">{slot.label}</span>
+      {slot.winner && (
+        <span
+          className={cn(
+            "font-mono text-[0.6875rem] font-bold uppercase",
+            final ? "text-gold" : "text-primary-glow",
+          )}
+        >
+          {final ? "Champion" : "Advances"}
+        </span>
+      )}
     </div>
   );
 }
 
-function Matchup({ slots, final = false }: { slots: readonly Slot[]; final?: boolean }) {
+function Matchup({ slots, final = false }: { slots: readonly ExampleSlot[]; final?: boolean }) {
   return (
     <div className="space-y-2 rounded-lg border border-border bg-elevated p-2">
       {slots.map((slot) => (
-        <BracketSlot key={slot.artist} slot={slot} final={final} />
+        <BracketSlot key={slot.label} slot={slot} final={final} />
       ))}
     </div>
   );
@@ -59,20 +53,24 @@ export function BattleTeaser() {
       <div className="section-shell">
         <Reveal>
           <SectionHeading
-            kicker="Survive the bracket"
+            kicker="Battle mode"
             title={
               <>
                 Every round gets{" "}
                 <span className="text-gradient">louder</span>
               </>
             }
-            description="Votes seed the battle. Winners advance head-to-head until one name owns the room."
+            description="Seeds face off head-to-head. The crowd decides each matchup and winners advance until one track owns the room."
           />
         </Reveal>
 
         <Reveal delay={0.12} className="mt-12">
           <div className="gradient-border noise-panel overflow-x-auto rounded-xl border border-transparent p-4 shadow-panel sm:p-8">
             <div className="relative min-w-[44rem]">
+              <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 font-mono text-[0.625rem] font-bold tracking-[0.16em] text-muted-foreground uppercase">
+                Example bracket
+              </div>
+
               <div className="mb-6 grid grid-cols-[1fr_4rem_1fr_4rem_0.72fr] items-center gap-4 font-mono text-[0.6875rem] font-bold tracking-[0.16em] text-muted-foreground uppercase">
                 <span>Semifinals</span>
                 <span />
@@ -83,8 +81,8 @@ export function BattleTeaser() {
 
               <div className="grid grid-cols-[1fr_4rem_1fr_4rem_0.72fr] items-center gap-4">
                 <div className="space-y-12">
-                  <Matchup slots={bracket.semiFinals.slice(0, 2)} />
-                  <Matchup slots={bracket.semiFinals.slice(2, 4)} />
+                  <Matchup slots={exampleBracket.semiFinals.slice(0, 2)} />
+                  <Matchup slots={exampleBracket.semiFinals.slice(2, 4)} />
                 </div>
 
                 <div className="space-y-28" aria-hidden="true">
@@ -100,7 +98,7 @@ export function BattleTeaser() {
                   ))}
                 </div>
 
-                <Matchup slots={bracket.final} final />
+                <Matchup slots={exampleBracket.final} final />
 
                 <motion.div
                   className="h-0.5 origin-left bg-gold shadow-[0_0_1.5rem_color-mix(in_srgb,var(--gold)_45%,transparent)]"
@@ -122,10 +120,11 @@ export function BattleTeaser() {
                   <span className="mt-3 font-mono text-[0.6875rem] font-bold tracking-[0.18em] text-gold uppercase">
                     Champion
                   </span>
-                  <strong className="display-text mt-1 text-4xl text-foreground">KNOX</strong>
-                  <span className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Trophy className="size-3.5 text-gold" aria-hidden="true" />
-                    82% crowd vote
+                  <strong className="mt-2 text-lg font-bold text-foreground">
+                    The room&apos;s pick
+                  </strong>
+                  <span className="mt-2 text-xs text-muted-foreground">
+                    Decided by the crowd&apos;s votes
                   </span>
                   <div className="absolute -bottom-10 size-28 rounded-full bg-gold/15" />
                 </motion.div>

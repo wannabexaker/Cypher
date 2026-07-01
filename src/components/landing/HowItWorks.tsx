@@ -2,7 +2,7 @@ import { ArrowRight, Crown, RadioTower, Share2 } from "lucide-react";
 
 import { Reveal } from "@/components/motion/Reveal";
 import { SectionHeading } from "@/components/landing/SectionHeading";
-import { steps } from "@/lib/mock";
+import { steps } from "@/lib/landing";
 
 const icons = [RadioTower, Share2, Crown] as const;
 

@@ -10,8 +10,9 @@ import { cn } from "@/lib/utils";
 
 const links = [
   { label: "How it works", href: "#how-it-works" },
-  { label: "Explore", href: "#live-channels" },
+  { label: "Formats", href: "#modes" },
   { label: "Battles", href: "#battles" },
+  { label: "Guide", href: "#guide" },
 ] as const;
 
 type NavbarProps = {

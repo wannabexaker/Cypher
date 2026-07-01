@@ -1,5 +1,5 @@
 import { Marquee } from "@/components/motion/Marquee";
-import { genres } from "@/lib/mock";
+import { genres } from "@/lib/landing";
 
 export function GenresMarquee() {
   return (

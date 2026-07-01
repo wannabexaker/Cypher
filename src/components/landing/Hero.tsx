@@ -1,14 +1,13 @@
 "use client";
 
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowDown, ArrowRight, Radio, Sparkles, Users } from "lucide-react";
+import { ArrowDown, ArrowRight, Radio, Sparkles } from "lucide-react";
 
 import { AuroraBackground } from "@/components/motion/AuroraBackground";
 import { CodeTyper } from "@/components/motion/CodeTyper";
 import { MagneticButton } from "@/components/motion/MagneticButton";
 import { WaveformBars } from "@/components/motion/WaveformBars";
 import { buttonVariants } from "@/components/ui/button";
-import { liveStats } from "@/lib/mock";
 
 type HeroProps = {
   createChannelHref: string;
@@ -137,13 +136,9 @@ export function Hero({ createChannelHref }: HeroProps) {
               Join code
               <CodeTyper className="mt-2 w-full" />
             </label>
-            <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1.5">
-                <Users className="size-3.5 text-primary-glow" aria-hidden="true" />
-                384 listening
-              </span>
-              <span className="font-mono text-lime">ROUND 02</span>
-            </div>
+            <p className="mt-4 text-xs text-muted-foreground">
+              No account needed to join and vote — just the code.
+            </p>
             <a
               href="/join"
               className={`${buttonVariants({ variant: "gradient", size: "sm" })} mt-5 w-full`}
@@ -153,27 +148,6 @@ export function Hero({ createChannelHref }: HeroProps) {
             </a>
           </motion.aside>
         </div>
-
-        <motion.div
-          custom={0.52}
-          variants={reveal}
-          initial="hidden"
-          animate="visible"
-          className="mt-14 grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3 lg:mt-16"
-        >
-          {liveStats.map((stat, index) => (
-            <div
-              key={stat.label}
-              className="flex min-h-20 items-center gap-4 bg-elevated px-5 py-4"
-            >
-              <span className="display-text text-3xl text-foreground">{stat.value}</span>
-              <span className="text-sm text-muted-foreground">{stat.label}</span>
-              {index === 0 && (
-                <span className="ml-auto size-2 rounded-full bg-lime shadow-glow-cyan motion-safe:animate-pulse-soft" />
-              )}
-            </div>
-          ))}
-        </motion.div>
 
         <a
           href="#how-it-works"

@@ -2,10 +2,11 @@ import { BattleTeaser } from "@/components/landing/BattleTeaser";
 import { FinalCta } from "@/components/landing/FinalCta";
 import { Footer } from "@/components/landing/Footer";
 import { GenresMarquee } from "@/components/landing/GenresMarquee";
+import { Guide } from "@/components/landing/Guide";
 import { Hero } from "@/components/landing/Hero";
 import { HowItWorks } from "@/components/landing/HowItWorks";
-import { LiveChannels } from "@/components/landing/LiveChannels";
 import { Navbar } from "@/components/landing/Navbar";
+import { WaysToCompete } from "@/components/landing/WaysToCompete";
 import { getCurrentUser } from "@/lib/session";
 
 export default async function Home() {
@@ -18,8 +19,9 @@ export default async function Home() {
       <main id="main-content">
         <Hero createChannelHref={createChannelHref} />
         <HowItWorks />
-        <LiveChannels />
+        <WaysToCompete />
         <BattleTeaser />
+        <Guide />
         <GenresMarquee />
         <FinalCta createChannelHref={createChannelHref} />
       </main>
