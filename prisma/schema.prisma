@@ -12,6 +12,9 @@
 
 generator client {
   provider = "prisma-client-js"
+  // "native" covers local dev + the arm64 build container; the explicit arm64
+  // target keeps `prisma generate` correct when cross-building the RPi image.
+  binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
 }
 
 datasource db {

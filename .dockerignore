@@ -1,0 +1,17 @@
+node_modules
+.next
+.git
+.github
+.artifacts
+coverage
+.env
+.env.*
+!.env.production.example
+tests
+docs
+deploy
+*.md
+.vscode
+.idea
+playwright.config.ts
+vitest.config.ts

@@ -1,0 +1,10 @@
+{
+  "name": "cypher-scanner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Internal HTTPS wrapper implementing Cypher's malware-scan contract on top of ClamAV (clamd over TCP).",
+  "dependencies": {
+    "clamscan": "^2.4.0"
+  }
+}

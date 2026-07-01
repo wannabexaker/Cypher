@@ -1,0 +1,29 @@
+# Override for a Raspberry Pi (or any host) that ALREADY runs cloudflared as a
+# host service sharing a tunnel with other projects. Do NOT use the `edge`
+# profile here — the host cloudflared reaches these services via localhost ports
+# added below.
+#
+# SINGLE-DOMAIN routing (no separate media subdomain): the app AND the media
+# objects live under one hostname. Add these ingress rules to
+# /etc/cloudflared/config.yml (media path FIRST, before the app catch-all):
+#
+#   - hostname: cypher.<domain>
+#     path: ^/cypher-media/.*
+#     service: http://localhost:9000        # MinIO (presigned object URLs)
+#   - hostname: cypher.<domain>
+#     service: http://localhost:3001        # the app
+#
+# and set S3_ENDPOINT="https://cypher.<domain>" with S3_FORCE_PATH_STYLE="true".
+#
+# Usage:
+#   docker compose --env-file .env.production \
+#     -f docker-compose.prod.yml -f docker-compose.pi.yml up -d --build
+
+services:
+  app:
+    ports:
+      - "127.0.0.1:3001:3000" # host cloudflared -> cypher.<domain>
+
+  minio:
+    ports:
+      - "127.0.0.1:9000:9000" # host cloudflared -> media.<domain> (presigned URLs)

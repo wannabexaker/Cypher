@@ -48,6 +48,9 @@ function contentSecurityPolicy(): string {
 }
 
 const nextConfig: NextConfig = {
+  // Self-host build target: emits .next/standalone (minimal Node server +
+  // traced deps) for a lean Docker runtime image. Ignored by Vercel.
+  output: "standalone",
   async headers() {
     return [
       {
