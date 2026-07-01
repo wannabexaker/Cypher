@@ -82,16 +82,17 @@ services:
 
   # ── Malware scanning (ClamAV + internal-TLS HTTP wrapper) ──────────────────
   clamav:
-    image: clamav/clamav:latest
+    build:
+      context: ./deploy/clamav
     restart: unless-stopped
     volumes:
       - cypher_clamav_data:/var/lib/clamav
     healthcheck:
-      test: ["CMD", "clamdcheck.sh"]
+      test: ["CMD-SHELL", "echo PING | nc -w 3 127.0.0.1 3310 | grep -q PONG"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 300s # first run downloads signatures via freshclam
+      start_period: 360s # first run downloads signatures via freshclam
 
   scanner:
     build:
