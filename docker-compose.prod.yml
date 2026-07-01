@@ -128,6 +128,10 @@ services:
     build:
       context: .
       target: runner
+      args:
+        # NEXT_PUBLIC_* must be baked at build time (inlined into the client JS).
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-}
+        NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY:-}
     restart: unless-stopped
     env_file:
       - .env.production
