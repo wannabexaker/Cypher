@@ -55,7 +55,7 @@ Legend: `[ ]` queued · `[~]` in progress · `[x]` delivered on the current deve
 | P0 | R01 | Integrate current development line into `main` | `[~]` | Local fast-forward is complete; remote review/push and green CI remain |
 | P0 | R02 | Production provider/secrets setup | `[ ]` | Postgres, private storage, Upstash, Turnstile, scanner, cron secret configured |
 | P0 | R03 | Staging migration and complete smoke | `[ ]` | Core host/guest/upload/vote/result/battle journey passes against production-like services |
-| P0 | R04 | Operational alerts and cron verification | `[ ]` | Failures are visible and both scheduled jobs are observed succeeding |
+| P0 | R04 | Operational alerts and cron verification | `[x]` | Failures are visible and both scheduled jobs are observed succeeding |
 | P1 | N01 | Public Explore | `[ ]` | Opt-in public discovery with no unlisted-room leakage |
 | P1 | N02 | Profiles | `[ ]` | Minimal registered-user profiles; guests remain local-only |
 | P1 | N03 | Admin | `[ ]` | Server-authorized moderation and operational tools |

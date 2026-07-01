@@ -26,6 +26,7 @@ export default defineConfig({
         "src/lib/embeds.ts",
         "src/lib/guest-profile.ts",
         "src/lib/malware-scan.ts",
+        "src/lib/ops-alerts.ts",
         "src/lib/rate-limit.ts",
         "src/lib/request.ts",
         "src/lib/turnstile.ts",
