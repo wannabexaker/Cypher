@@ -150,8 +150,7 @@ tests/api/               Playwright API integration tests
 tests/e2e/               desktop browser journeys
 tests/mobile/            mobile browser journeys
 docs/ROADMAP.md          delivered and remaining work
-docs/CODEX_TASKS.md      implementation queue
-docs/codex/              handoff and delivery history
+docs/testing/            test routines and runbooks
 ```
 
 ## Current status
