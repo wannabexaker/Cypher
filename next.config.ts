@@ -33,7 +33,7 @@ function contentSecurityPolicy(): string {
     `default-src 'self'`,
     `base-uri 'self'`,
     `form-action 'self'`,
-    `frame-ancestors 'none'`,
+    `frame-ancestors 'self' https://olamov.com https://*.olamov.com`,
     `object-src 'none'`,
     `script-src ${scriptSrc.join(" ")}`,
     `style-src 'self' 'unsafe-inline'`,
@@ -67,10 +67,6 @@ const nextConfig: NextConfig = {
           {
             key: "Referrer-Policy",
             value: "strict-origin-when-cross-origin",
-          },
-          {
-            key: "X-Frame-Options",
-            value: "DENY",
           },
         ],
       },
