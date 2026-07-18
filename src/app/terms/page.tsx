@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     "The rules for hosting rooms, submitting tracks, and voting on Cypher, including content ownership and retention.",
 };
 
-const CONTACT = "contact@olamov.com";
+const CONTACT = "dimos.is.dev@gmail.com";
 
 export default async function TermsPage() {
   const user = await getCurrentUser();
@@ -132,7 +132,11 @@ export default async function TermsPage() {
         <p>
           If these terms change we will update the date at the top of this page; continuing to use
           Cypher means you accept the new version. These terms are governed by the laws of Greece.
-          Questions go to <strong className="text-foreground">{CONTACT}</strong>.
+          Questions go to{" "}
+          <a href={`mailto:${CONTACT}`} className="text-primary-glow underline underline-offset-4">
+            {CONTACT}
+          </a>
+          .
         </p>
         <p>
           See also our{" "}

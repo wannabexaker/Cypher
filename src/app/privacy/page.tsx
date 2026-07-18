@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     "What Cypher collects, why, how long it is kept, and the choices you have. No advertising or tracking cookies.",
 };
 
-const CONTACT = "contact@olamov.com";
+const CONTACT = "dimos.is.dev@gmail.com";
 
 export default async function PrivacyPage() {
   const user = await getCurrentUser();
@@ -25,7 +25,12 @@ export default async function PrivacyPage() {
         <p>
           Cypher is operated by Olamov and served from self-hosted infrastructure at{" "}
           <strong className="text-foreground">cypher.olamov.com</strong>. For anything in this
-          policy, contact <strong className="text-foreground">{CONTACT}</strong>.
+          policy, contact <a
+            href={`mailto:${CONTACT}`}
+            className="text-primary-glow underline underline-offset-4"
+          >
+            {CONTACT}
+          </a>.
         </p>
       </LegalSection>
 
@@ -159,7 +164,12 @@ export default async function PrivacyPage() {
       <LegalSection title="Your choices and rights">
         <p>
           You can ask us to access, correct, export, or delete your personal data, or object to how
-          we use it. Write to <strong className="text-foreground">{CONTACT}</strong> and we will
+          we use it. Write to <a
+            href={`mailto:${CONTACT}`}
+            className="text-primary-glow underline underline-offset-4"
+          >
+            {CONTACT}
+          </a> and we will
           respond within a reasonable time. Hosts can delete a whole room themselves at any moment;
           guests can simply stop using a room and their data disappears with it at the retention
           window.
