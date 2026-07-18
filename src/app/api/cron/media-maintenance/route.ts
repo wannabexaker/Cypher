@@ -161,22 +161,13 @@ export async function GET(request: Request) {
         detail: summary,
       });
     } else {
-      await prisma.auditLog
-        .create({
-          data: {
-            actorUserId: null,
-            action: "cron.media_maintenance.ok",
-            entityType: AUDIT_ENTITY_TYPE,
-            entityId: CRON_JOB,
-            metadata: summary,
-          },
-        })
-        .catch((auditError) => {
-          console.error(
-            "Failed to write cron.media_maintenance.ok audit row",
-            auditError,
-          );
-        });
+      // Clean runs are deliberately NOT written to the audit log: a daily "ok"
+      // row is pure noise in a table meant for accountable actions. Success
+      // stays visible in the container logs and in this response; only degraded
+      // runs and failures are persisted.
+      console.log(
+        `cron.media_maintenance ok — ${databaseRowsRemoved} row(s), ${storageObjectsRemoved} object(s) removed`,
+      );
     }
 
     return NextResponse.json(degraded ? { ...summary, degraded: true } : summary);

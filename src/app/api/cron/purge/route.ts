@@ -78,19 +78,11 @@ export async function GET(request: Request) {
 
     const summary = { purged: results.length, channels: results };
 
-    await prisma.auditLog
-      .create({
-        data: {
-          actorUserId: null,
-          action: "cron.purge.ok",
-          entityType: AUDIT_ENTITY_TYPE,
-          entityId: CRON_JOB,
-          metadata: { purged: results.length },
-        },
-      })
-      .catch((error) => {
-        console.error("Failed to write cron.purge.ok audit row", error);
-      });
+    // Successful runs are deliberately NOT written to the audit log: a daily
+    // "ok" row is pure noise in a table meant for accountable actions. Success
+    // stays visible in the container logs and in this response; only failures
+    // (and degraded runs) are persisted.
+    console.log(`cron.purge ok — purged ${results.length} channel(s)`);
 
     return NextResponse.json(summary);
   } catch (error) {

@@ -66,22 +66,15 @@ describe("GET /api/cron/purge", () => {
     expect(auditCreate).not.toHaveBeenCalled();
   });
 
-  it("writes a cron.purge.ok audit row on the happy path", async () => {
+  it("writes no audit row on the happy path", async () => {
     channelFindMany.mockResolvedValue([]);
 
     const response = await purgeGet(authorized());
     expect(response.status).toBe(200);
 
-    expect(auditCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          action: "cron.purge.ok",
-          entityType: "cron",
-          entityId: "purge",
-          actorUserId: null,
-        }),
-      }),
-    );
+    // Successful runs are intentionally not persisted — the audit log records
+    // only failures, so a daily "ok" row never accumulates as noise.
+    expect(auditCreate).not.toHaveBeenCalled();
     expect(emitAlertMock).not.toHaveBeenCalled();
   });
 
@@ -124,7 +117,7 @@ describe("GET /api/cron/media-maintenance", () => {
     expect(auditCreate).not.toHaveBeenCalled();
   });
 
-  it("writes cron.media_maintenance.ok when the run has no failures", async () => {
+  it("writes no audit row when the run has no failures", async () => {
     mediaFindMany.mockResolvedValue([]);
     listPageMock.mockResolvedValue({
       objects: [],
@@ -138,15 +131,9 @@ describe("GET /api/cron/media-maintenance", () => {
     expect(body.deletionFailures).toBe(0);
     expect(body.inventoryComplete).toBe(true);
 
-    expect(auditCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          action: "cron.media_maintenance.ok",
-          entityType: "cron",
-          entityId: "media-maintenance",
-        }),
-      }),
-    );
+    // Clean runs are intentionally not persisted — only degraded runs and
+    // failures reach the audit log.
+    expect(auditCreate).not.toHaveBeenCalled();
     expect(emitAlertMock).not.toHaveBeenCalled();
   });
 
