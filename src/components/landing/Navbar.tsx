@@ -2,17 +2,20 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { LogOut, Menu, Radio, UserRound, X } from "lucide-react";
+import Link from "next/link";
 import { signOut } from "next-auth/react";
 import { useState } from "react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+// Absolute (/#anchor) so the nav also works from pages other than the landing,
+// e.g. /terms and /privacy, which render this same navbar.
 const links = [
-  { label: "How it works", href: "#how-it-works" },
-  { label: "Formats", href: "#modes" },
-  { label: "Battles", href: "#battles" },
-  { label: "Guide", href: "#guide" },
+  { label: "How it works", href: "/#how-it-works" },
+  { label: "Formats", href: "/#modes" },
+  { label: "Battles", href: "/#battles" },
+  { label: "Guide", href: "/#guide" },
 ] as const;
 
 type NavbarProps = {
@@ -38,8 +41,8 @@ export function Navbar({ user }: NavbarProps) {
         className="section-shell flex min-h-18 items-center justify-between gap-4"
         aria-label="Main navigation"
       >
-        <a
-          href="#top"
+        <Link
+          href="/#top"
           className="display-text group inline-flex min-h-11 items-center text-2xl tracking-[0.04em]"
           aria-label="Cypher home"
         >
@@ -54,7 +57,7 @@ export function Navbar({ user }: NavbarProps) {
             transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
             aria-hidden="true"
           />
-        </a>
+        </Link>
 
         <div className="hidden items-center gap-1 lg:flex">
           {links.map((link) => (

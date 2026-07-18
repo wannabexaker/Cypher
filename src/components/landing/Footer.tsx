@@ -1,10 +1,18 @@
 import { Camera, Music2, Video } from "lucide-react";
+import Link from "next/link";
 
+// Absolute (/#anchor) so these also work from pages other than the landing,
+// e.g. /terms and /privacy, which render this same footer.
 const footerLinks = [
-  { label: "How it works", href: "#how-it-works" },
-  { label: "Formats", href: "#modes" },
-  { label: "Battles", href: "#battles" },
-  { label: "Guide", href: "#guide" },
+  { label: "How it works", href: "/#how-it-works" },
+  { label: "Formats", href: "/#modes" },
+  { label: "Battles", href: "/#battles" },
+  { label: "Guide", href: "/#guide" },
+] as const;
+
+const legalLinks = [
+  { label: "Terms", href: "/terms" },
+  { label: "Privacy", href: "/privacy" },
 ] as const;
 
 const socialLinks = [
@@ -18,12 +26,12 @@ export function Footer() {
     <footer className="border-t border-border bg-elevated/50">
       <div className="section-shell flex flex-col gap-8 py-10 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <a
-            href="#top"
+          <Link
+            href="/"
             className="display-text inline-flex min-h-11 items-center text-3xl tracking-[0.04em]"
           >
             CYPHER<span className="text-magenta">.</span>
-          </a>
+          </Link>
           <p className="mt-2 text-sm text-muted-foreground">
             Drop your bars. The crowd decides.
           </p>
@@ -56,9 +64,19 @@ export function Footer() {
         </div>
       </div>
       <div className="border-t border-border">
-        <div className="section-shell flex min-h-16 flex-col justify-center gap-1 py-3 font-mono text-[0.6875rem] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+        <div className="section-shell flex min-h-16 flex-col justify-center gap-3 py-3 font-mono text-[0.6875rem] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <span>© 2026 CYPHER. ALL SIGNAL, NO NOISE.</span>
-          <span>BUILT FOR THE NEXT ROUND.</span>
+          <nav className="flex flex-wrap items-center gap-x-5 gap-y-2" aria-label="Legal">
+            {legalLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="inline-flex min-h-11 items-center uppercase tracking-[0.12em] transition-colors hover:text-foreground"
+              >
+                {link.label}
+              </Link>
+            ))}
+          </nav>
         </div>
       </div>
     </footer>
