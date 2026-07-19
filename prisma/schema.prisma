@@ -569,3 +569,21 @@ model AuditLog {
   @@index([actorUserId])
   @@map("audit_logs")
 }
+
+// Ops liveness for the scheduled jobs (the cron container hits /api/cron/*).
+// Exactly ONE row per job, updated in place — it never grows. This answers
+// "did the job actually run, and when did it last succeed?" without writing an
+// audit row per successful run. Failures/degraded runs are still recorded in
+// audit_logs, which stays a log of things that went wrong.
+model CronRun {
+  id            String    @id @default(uuid())
+  job           String    @unique // "purge" | "media-maintenance"
+  lastRunAt     DateTime  @map("last_run_at")
+  lastStatus    String    @map("last_status") // "ok" | "degraded" | "failed"
+  lastSuccessAt DateTime? @map("last_success_at")
+  lastMessage   String?   @map("last_message")
+  summary       Json?
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("cron_runs")
+}

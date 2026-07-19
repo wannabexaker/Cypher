@@ -5,6 +5,7 @@ vi.mock("@/lib/prisma", () => ({
     channel: { findMany: vi.fn() },
     mediaAsset: { findMany: vi.fn(), deleteMany: vi.fn() },
     auditLog: { create: vi.fn() },
+    cronRun: { upsert: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -37,6 +38,7 @@ function unauthorized() {
 }
 
 const auditCreate = prisma.auditLog.create as unknown as ReturnType<typeof vi.fn>;
+const cronRunUpsert = prisma.cronRun.upsert as unknown as ReturnType<typeof vi.fn>;
 const channelFindMany = prisma.channel.findMany as unknown as ReturnType<typeof vi.fn>;
 const mediaFindMany = prisma.mediaAsset.findMany as unknown as ReturnType<typeof vi.fn>;
 const mediaDeleteMany = prisma.mediaAsset.deleteMany as unknown as ReturnType<typeof vi.fn>;
@@ -76,6 +78,14 @@ describe("GET /api/cron/purge", () => {
     // only failures, so a daily "ok" row never accumulates as noise.
     expect(auditCreate).not.toHaveBeenCalled();
     expect(emitAlertMock).not.toHaveBeenCalled();
+
+    // ...but the single liveness row is stamped so the run is still provable.
+    expect(cronRunUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { job: "purge" },
+        update: expect.objectContaining({ lastStatus: "ok" }),
+      }),
+    );
   });
 
   it("writes cron.purge.failed and returns 500 on unhandled errors", async () => {
@@ -135,6 +145,14 @@ describe("GET /api/cron/media-maintenance", () => {
     // failures reach the audit log.
     expect(auditCreate).not.toHaveBeenCalled();
     expect(emitAlertMock).not.toHaveBeenCalled();
+
+    // ...but the single liveness row is stamped so the run is still provable.
+    expect(cronRunUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { job: "media-maintenance" },
+        update: expect.objectContaining({ lastStatus: "ok" }),
+      }),
+    );
   });
 
   it("returns 200 degraded and writes an audit row when inventory fails", async () => {

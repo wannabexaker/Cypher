@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { isCronAuthorized } from "@/lib/cron";
+import { recordCronRun } from "@/lib/cron-runs";
 import { emitOpsAlert } from "@/lib/ops-alerts";
 import { prisma } from "@/lib/prisma";
 import { deleteObject } from "@/lib/storage";
@@ -79,10 +80,15 @@ export async function GET(request: Request) {
     const summary = { purged: results.length, channels: results };
 
     // Successful runs are deliberately NOT written to the audit log: a daily
-    // "ok" row is pure noise in a table meant for accountable actions. Success
-    // stays visible in the container logs and in this response; only failures
-    // (and degraded runs) are persisted.
-    console.log(`cron.purge ok — purged ${results.length} channel(s)`);
+    // "ok" row is pure noise in a table meant for accountable actions. Instead
+    // the run stamps the single cron_runs liveness row (updated in place), so
+    // "when did purge last succeed?" is answerable without the log growing.
+    // Only the channel COUNT is kept — not the names/codes of deleted rooms.
+    await recordCronRun({
+      job: CRON_JOB,
+      status: "ok",
+      summary: { purged: results.length },
+    });
 
     return NextResponse.json(summary);
   } catch (error) {
@@ -105,6 +111,8 @@ export async function GET(request: Request) {
           auditError,
         );
       });
+
+    await recordCronRun({ job: CRON_JOB, status: "failed", message });
 
     await emitOpsAlert({
       job: "cron.purge",

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { isCronAuthorized } from "@/lib/cron";
+import { recordCronRun } from "@/lib/cron-runs";
 import { emitOpsAlert } from "@/lib/ops-alerts";
 import { prisma } from "@/lib/prisma";
 import { deleteObject, listStorageObjectsPage } from "@/lib/storage";
@@ -160,15 +161,16 @@ export async function GET(request: Request) {
         status: "degraded",
         detail: summary,
       });
-    } else {
-      // Clean runs are deliberately NOT written to the audit log: a daily "ok"
-      // row is pure noise in a table meant for accountable actions. Success
-      // stays visible in the container logs and in this response; only degraded
-      // runs and failures are persisted.
-      console.log(
-        `cron.media_maintenance ok — ${databaseRowsRemoved} row(s), ${storageObjectsRemoved} object(s) removed`,
-      );
     }
+
+    // Every outcome stamps the single cron_runs liveness row (updated in place)
+    // so "when did this last run / last run cleanly?" is answerable without the
+    // audit log growing a row per successful run.
+    await recordCronRun({
+      job: CRON_JOB,
+      status: degraded ? "degraded" : "ok",
+      summary,
+    });
 
     return NextResponse.json(degraded ? { ...summary, degraded: true } : summary);
   } catch (error) {
@@ -191,6 +193,8 @@ export async function GET(request: Request) {
           auditError,
         );
       });
+
+    await recordCronRun({ job: CRON_JOB, status: "failed", message });
 
     await emitOpsAlert({
       job: "cron.media_maintenance",
