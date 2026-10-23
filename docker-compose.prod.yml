@@ -25,7 +25,11 @@ services:
 
   # ── Object storage (private; browser reaches it via the tunnel) ────────────
   minio:
-    image: minio/minio:latest
+    # Upstream stopped publishing minio/minio and minio/mc images (removed from
+    # Docker Hub and quay.io). pgsty/* is the community-maintained, drop-in fork
+    # (same binaries and CLI), multi-arch. Pinned; keep in sync with
+    # docker-compose.yml and bump deliberately.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -43,7 +47,7 @@ services:
       retries: 10
 
   createbuckets:
-    image: minio/mc:latest
+    image: pgsty/mc:RELEASE.2026-10-18T00-00-00Z
     depends_on:
       minio:
         condition: service_healthy

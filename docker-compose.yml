@@ -18,7 +18,11 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    # Upstream stopped publishing minio/minio and minio/mc images (removed from
+    # Docker Hub and quay.io). pgsty/* is the community-maintained, drop-in fork
+    # (same binaries and CLI), multi-arch. Pinned so CI and the Pi run the same
+    # version; bump the tags deliberately.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: cypher-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -37,7 +41,7 @@ services:
       retries: 10
 
   createbuckets:
-    image: minio/mc:latest
+    image: pgsty/mc:RELEASE.2026-10-18T00-00-00Z
     container_name: cypher-createbuckets
     depends_on:
       minio:
