@@ -42,15 +42,15 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
+      # pnpm version comes from package.json "packageManager" (single source of
+      # truth; the action fails if a second, different version is set here).
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.12.4
+        uses: pnpm/action-setup@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -79,7 +79,7 @@ jobs:
       - name: Wait for test services
         shell: bash
         run: |
-          for attempt in {1..30}; do
+          for _ in {1..30}; do
             if docker compose exec -T postgres pg_isready -U cypher -d cypher \
               && curl --fail --silent http://localhost:9000/minio/health/live > /dev/null; then
               exit 0
@@ -101,9 +101,11 @@ jobs:
       - name: Build production application
         run: pnpm build
 
+      # Push runs only: a PR is judged by its job status, and per-PR uploads
+      # would multiply Actions storage for no benefit.
       - name: Upload Playwright failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
+        if: failure() && github.event_name == 'push'
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-artifacts
           path: .artifacts/
