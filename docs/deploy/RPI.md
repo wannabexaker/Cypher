@@ -7,6 +7,10 @@ internet through a **Cloudflare Tunnel** (no port-forwarding, home IP hidden).
 `redis` + `srh` (Upstash-REST-compatible rate limits) · `clamav` + `scanner`
 (malware) · `migrate` (one-shot) · `cron` · `cloudflared`.
 
+> On a shared Pi with no real traffic, run **light mode** instead: same site,
+> ClamAV off, file uploads refused, ~450 MB instead of ~3 GB. See
+> [RPI-LIGHT.md](RPI-LIGHT.md).
+
 ## 0. Prerequisites
 
 - **Raspberry Pi 4 or 5, ≥4GB RAM** (ClamAV needs ~1–1.5GB). 64-bit OS

@@ -1,0 +1,76 @@
+# Light mode for a shared Raspberry Pi: the site stays up for visitors, the
+# expensive parts stay off. Layer it on top of the other two files:
+#
+#   docker compose --env-file .env.production \
+#     -f docker-compose.prod.yml -f docker-compose.pi.yml \
+#     -f docker-compose.pi-light.yml up -d --no-build
+#
+# What it changes (see docs/deploy/RPI-LIGHT.md for the full picture):
+# - clamav and scanner move to the `scanner` profile, so a plain `up` never
+#   starts them. File uploads then fail closed: the app has no scanner, answers
+#   503 and never promotes or serves an unscanned file. Spotify/SoundCloud
+#   links still work.
+# - srh (Upstash-REST shim) stays, because sign-in, sign-up, joining a room and
+#   voting are rate limited and fail closed without it. Under the full stack it
+#   reached 1.6 GB: the Erlang VM sized its port table from Docker's default
+#   open-files limit (~1 billion). A sane nofile limit fixes that (~60 MB).
+#   As a backstop against a real leak it also gets RLIMIT_DATA. The Pi kernel
+#   boots with cgroup_disable=memory, so mem_limit would be silently ignored;
+#   rlimits are per-process kernel limits and do not need the memory cgroup.
+#   If the VM hits the cap it exits and the restart policy starts a fresh one.
+# - redis and the app get their own in-process caps for the same reason.
+
+services:
+  app:
+    # Same as the base file minus `scanner`, which is not started here.
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      srh:
+        condition: service_started
+    environment:
+      # Empty = "scanner not configured". In production the app then refuses
+      # file submissions (503) instead of waiting on a host that does not exist.
+      MALWARE_SCAN_URL: ""
+      # V8 heap cap; Node aborts and Docker restarts it if it is ever exceeded.
+      NODE_OPTIONS: "--max-old-space-size=256"
+
+  clamav:
+    profiles: ["scanner"]
+
+  scanner:
+    profiles: ["scanner"]
+
+  redis:
+    # Rate-limit keys only, all with a TTL. Evict the soonest-expiring keys
+    # rather than grow past the cap.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - volatile-ttl
+
+  srh:
+    # Pinned to the digest of `latest` (0.0.10, May 2024, the newest release).
+    image: hiett/serverless-redis-http@sha256:5b0bb9239fce53abf87b2018a7a0deb9ec7bd900c5360738fe5fbeeb426f9150
+    # restart: unless-stopped comes from the base file; it also covers a crash.
+    ulimits:
+      # The actual cause of the 1.6 GB: the Erlang VM sizes its port table
+      # from the open-files limit, and Docker's default here is ~1 billion,
+      # so it allocates a ~1.6 GB table at boot. 16384 open files is plenty
+      # for one Redis connection plus the app's HTTP requests.
+      nofile:
+        soft: 16384
+        hard: 16384
+      # Backstop for a real leak: RLIMIT_DATA, in bytes (256 MiB). Enforced by
+      # the kernel per process, no memory cgroup needed.
+      data:
+        soft: 268435456
+        hard: 268435456
