@@ -78,8 +78,12 @@ ps -o rss= -p "$P"                       # KB
 
 ## Commands
 
-Run from the checkout on the Pi, with the same `.env.production` as the full
-stack. Define a shortcut first:
+The usual redeploy is one command, `scripts/deploy-pi.sh` (light is its
+default; `--full` switches to the full stack). It pulls `origin/main`, rebuilds,
+stops ClamAV when coming from full mode, and waits for `/api/health`.
+
+For anything else, run from the checkout on the Pi, with the same
+`.env.production` as the full stack. Define a shortcut first:
 
 ```bash
 LIGHT="docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.pi.yml -f docker-compose.pi-light.yml"

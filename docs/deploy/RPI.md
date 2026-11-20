@@ -114,7 +114,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml logs -f app
 
 ## 7. Operations
 
-- **Update / redeploy:** `git pull` then re-run the `up -d --build` command. `migrate` applies any new migrations automatically.
+- **Update / redeploy:** `scripts/deploy-pi.sh` (light mode, the default on the shared Pi) or `scripts/deploy-pi.sh --full`. It resets the checkout to `origin/main`, rebuilds, starts the stack, waits for `/api/health` and prints the deployed version. `migrate` applies any new migrations automatically.
 - **Logs:** `docker compose --env-file .env.production -f docker-compose.prod.yml logs -f <service>`.
 - **Backups:** the state lives in named volumes `cypher_pg_data` + `cypher_minio_data`. Back them up, e.g.:
   ```bash
