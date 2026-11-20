@@ -7,9 +7,9 @@ internet through a **Cloudflare Tunnel** (no port-forwarding, home IP hidden).
 `redis` + `srh` (Upstash-REST-compatible rate limits) · `clamav` + `scanner`
 (malware) · `migrate` (one-shot) · `cron` · `backup` · `cloudflared`.
 
-> On a shared Pi with no real traffic, run **light mode** instead: same site,
-> ClamAV off, file uploads refused, ~450 MB instead of ~3 GB. See
-> [RPI-LIGHT.md](RPI-LIGHT.md).
+> **Light mode is the default** of the compose files: same site, ClamAV off,
+> file uploads refused, ~450 MB instead of ~3 GB ([RPI-LIGHT.md](RPI-LIGHT.md)).
+> This runbook sets up full mode, so its commands add `--profile scanner`.
 
 ## 0. Prerequisites
 
@@ -86,9 +86,14 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
 ## 5. Build and start
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+C="docker compose --env-file .env.production -f docker-compose.prod.yml --profile scanner --profile edge"
+$C up -d --build
 ```
 
+- `--profile scanner` starts ClamAV and the scanner (full mode); drop it for
+  light mode. `--profile edge` starts the bundled `cloudflared` for a
+  single-box setup; on a host that already runs `cloudflared`, drop it and add
+  `-f docker-compose.pi.yml` instead (see that file's header).
 - The **first build** compiles Next.js on the Pi — several minutes on a Pi 5,
   longer on a Pi 4. (Alternatively cross-build on a laptop:
   `docker buildx build --platform linux/arm64 -t cypher-app --load .`)
@@ -99,8 +104,8 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up -d --bui
 Watch it come up:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml ps
-docker compose --env-file .env.production -f docker-compose.prod.yml logs -f app cloudflared
+$C ps
+$C logs -f app cloudflared
 ```
 
 ## 6. Verify
@@ -110,7 +115,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml logs -f app
 - Submit a YouTube/Spotify embed (plays) and, once ClamAV is healthy, a file upload (becomes playable only when `CLEAN`).
 - Guest joins + casts a W and an L (fingerprint + Turnstile enforced; a repeat is locked).
 - Run a leaderboard + a battle contest end-to-end.
-- Cron check: `docker compose ... exec cron sh -c 'curl -fsS -H "Authorization: Bearer $CRON_SECRET" http://app:3000/api/cron/media-maintenance'` → 200; confirm a `cron.*.ok` audit row.
+- Cron check: `docker compose ... exec cron sh -c 'curl -fsS -H "Authorization: Bearer $CRON_SECRET" http://app:3000/api/cron/media-maintenance'` → 200; then `$C exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT job, last_status FROM cron_runs;"'` shows `ok` (a success writes this liveness row, not an audit row).
 
 ## 7. Operations
 
@@ -181,6 +186,6 @@ back, a stored object was readable again and the bucket stayed private).
 ## 9. Troubleshooting
 
 - **Media 403 / signature errors:** ensure the tunnel preserves the Host header and `S3_ENDPOINT` host == the media public hostname. If it persists, set `MINIO_SERVER_URL=https://media.example.com` on the `minio` service and restart.
-- **Uploads always fail:** ClamAV not healthy yet (`docker compose ... ps`), or `MALWARE_SCAN_URL` not `https://scanner:8443`, or the cert CN/SAN isn't `scanner`.
+- **Uploads always fail:** light mode (the stack was started without `--profile scanner`; that is the intended 503), ClamAV not healthy yet (`docker compose ... ps`), or `MALWARE_SCAN_URL` not `https://scanner:8443`, or the cert CN/SAN isn't `scanner`.
 - **Votes return 503:** the SRH/Redis backend is down, or `UPSTASH_REDIS_REST_TOKEN` ≠ the `srh` `SRH_TOKEN` — they must match.
 - **Login redirect loops:** `AUTH_URL`/`NEXTAUTH_URL` must be the exact public origin and `AUTH_TRUST_HOST=true`.

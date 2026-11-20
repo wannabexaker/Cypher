@@ -15,7 +15,11 @@
 #
 # and set S3_ENDPOINT="https://cypher.<domain>" with S3_FORCE_PATH_STYLE="true".
 #
-# Usage:
+# It also adds per-process memory caps. The Pi kernel boots with
+# cgroup_disable=memory, so mem_limit would be accepted and silently ignored;
+# these limits are enforced by the kernel (rlimits) or by the program itself.
+#
+# Usage (normally via scripts/deploy-pi.sh; add --profile scanner for full mode):
 #   docker compose --env-file .env.production \
 #     -f docker-compose.prod.yml -f docker-compose.pi.yml up -d --build
 
@@ -30,6 +34,9 @@ services:
     dns:
       - "1.1.1.1"
       - "1.0.0.1"
+    environment:
+      # V8 heap cap; Node aborts and Docker restarts it if it is ever exceeded.
+      NODE_OPTIONS: "--max-old-space-size=256"
 
   minio:
     ports:
@@ -40,3 +47,24 @@ services:
     dns:
       - "1.1.1.1"
       - "1.0.0.1"
+
+  redis:
+    # Rate-limit keys only, all with a TTL. Evict the soonest-expiring keys
+    # rather than grow past the cap.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - volatile-ttl
+
+  srh:
+    # nofile (in docker-compose.prod.yml) keeps the Erlang VM at ~60 MB. This is
+    # the backstop for a real leak: RLIMIT_DATA, 256 MiB. Past it allocations
+    # fail, the VM exits and restart: unless-stopped starts a fresh one.
+    ulimits:
+      data:
+        soft: 268435456
+        hard: 268435456

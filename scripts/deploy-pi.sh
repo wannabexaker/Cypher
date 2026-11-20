@@ -42,8 +42,9 @@ main() {
   echo "HEAD: $(git log --oneline -1)"
 
   set -- --env-file .env.production -f docker-compose.prod.yml -f docker-compose.pi.yml
-  if [ "$mode" = light ]; then
-    set -- "$@" -f docker-compose.pi-light.yml
+  # Full mode = the `scanner` profile (ClamAV + scanner) on top of light.
+  if [ "$mode" = full ]; then
+    set -- "$@" --profile scanner
   fi
 
   echo "mode: $mode"

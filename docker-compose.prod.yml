@@ -1,6 +1,15 @@
 # Cypher — self-hosted production stack (Raspberry Pi, arm64).
 # Run with the env file supplied for BOTH interpolation and container env:
 #   docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+# On a host that already runs cloudflared, add -f docker-compose.pi.yml.
+#
+# Two modes, one file:
+# - light (default): ClamAV and the scanner stay off. File submissions fail
+#   closed (503, never stored as final or served); links and everything else
+#   work. docs/deploy/RPI-LIGHT.md
+# - full: add `--profile scanner` to start ClamAV and the scanner too.
+# scripts/deploy-pi.sh picks the mode (light, or --full).
+#
 # Admin-only ports bind to 127.0.0.1. Public traffic arrives ONLY via cloudflared.
 # See docs/deploy/RPI.md for the full runbook.
 
@@ -74,7 +83,8 @@ services:
       retries: 10
 
   srh:
-    image: hiett/serverless-redis-http:latest
+    # Pinned to the digest of `latest` (multi-arch, the newest release).
+    image: hiett/serverless-redis-http@sha256:5b0bb9239fce53abf87b2018a7a0deb9ec7bd900c5360738fe5fbeeb426f9150
     restart: unless-stopped
     environment:
       SRH_MODE: env
@@ -92,7 +102,11 @@ services:
         condition: service_healthy
 
   # ── Malware scanning (ClamAV + internal-TLS HTTP wrapper) ──────────────────
+  # Full mode only (`--profile scanner`): ClamAV needs ~1 GB of RAM. Without
+  # it the app cannot reach MALWARE_SCAN_URL, treats the scan as unavailable
+  # and refuses file submissions with 503.
   clamav:
+    profiles: ["scanner"]
     build:
       context: ./deploy/clamav
     restart: unless-stopped
@@ -106,6 +120,7 @@ services:
       start_period: 360s # first run downloads signatures via freshclam
 
   scanner:
+    profiles: ["scanner"]
     build:
       context: ./deploy/scanner
     restart: unless-stopped
@@ -164,6 +179,7 @@ services:
         condition: service_started
       scanner:
         condition: service_started
+        required: false # only in full mode (--profile scanner); Compose >= 2.20
     healthcheck:
       test:
         - CMD

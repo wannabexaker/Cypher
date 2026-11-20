@@ -5,10 +5,11 @@ mostly ClamAV. On a Pi that also hosts other projects, and with no real users
 yet, that is a waste. Light mode keeps the site up and correct for visitors and
 leaves the expensive parts off.
 
-It is one extra compose file, `docker-compose.pi-light.yml`, layered on top of
-`docker-compose.prod.yml` + `docker-compose.pi.yml`. Nothing is removed: the
-stopped containers, every volume and all data stay as they are, and switching
-back to full is one command.
+It is what `docker-compose.prod.yml` + `docker-compose.pi.yml` start by default:
+ClamAV and the scanner sit in the `scanner` profile, so a plain `up` leaves
+them off, and full mode is the same command with `--profile scanner`. Switching
+only starts or stops those two containers; nothing else is recreated. Every
+volume and all data stay as they are.
 
 ## What runs, what is off
 
@@ -19,7 +20,7 @@ back to full is one command.
 | `cron` | on | nightly purge + orphan cleanup, ~1 MB |
 | `backup` | on | nightly DB dump + media copy at 03:30 UTC ([RPI.md](RPI.md#backups)) |
 | `migrate`, `createbuckets` | one-shot | run on `up`, then exit |
-| `clamav` + `scanner` | **off** | ~1 GB; moved to the `scanner` profile |
+| `clamav` + `scanner` | **off** | ~1 GB; only with `--profile scanner` |
 
 Measured on a Pi 4 (8 GB), process RSS per container, 2026-11-20:
 
@@ -34,17 +35,17 @@ Measured on a Pi 4 (8 GB), process RSS per container, 2026-11-20:
 | **total** | **~450 MB** |
 
 For comparison the full stack used ~3 GB on the same Pi, 1.6 GB of it `srh`
-(see below; fixed since, the `nofile` cap is now in `docker-compose.prod.yml`
-too) and ~1 GB `clamav`.
+(see below; fixed since, in both modes) and ~1 GB `clamav`.
 
 ## What a visitor can and cannot do
 
 - **Can:** open every page, register and sign in (email/password, Google if
   configured), create channels and contests, join as a guest, vote, submit
   Spotify/SoundCloud links, play media that is already stored.
-- **Cannot upload audio files.** The app gets an empty `MALWARE_SCAN_URL`, so in
-  production it treats the scanner as unavailable and answers the submission
-  with **503 "File security scanning is temporarily unavailable"**. This is
+- **Cannot upload audio files.** The scanner is not running, so the app's scan
+  request to `MALWARE_SCAN_URL` fails; in production it treats the scan as
+  unavailable and answers the submission with **503 "File security scanning is
+  temporarily unavailable"** (a unit test pins this). This is
   fail-closed: the file stays in `media/staging/`, is never promoted to
   `media/final/` and is never served. The nightly `media-maintenance` job
   deletes such unlinked uploads after `MEDIA_ORPHAN_TTL_HOURS` (default 24 h).
@@ -55,8 +56,10 @@ That is the intended trade-off for a showcase. To accept uploads, switch to full
 
 The Raspberry Pi kernel boots with `cgroup_disable=memory`. Docker says so in
 `docker info` (`WARNING: No memory limit support`) and `docker stats` reads 0.
-A `mem_limit` would be accepted and silently ignored. Light mode uses limits
-that the kernel or the program enforces per process instead:
+A `mem_limit` would be accepted and silently ignored. The compose files use
+limits that the kernel or the program enforces per process instead, in both
+modes (`nofile` and the digest pin in `docker-compose.prod.yml`, the rest in
+`docker-compose.pi.yml`):
 
 - **srh** — `ulimits.nofile: 16384` and `ulimits.data: 256 MiB`.
   The 1.6 GB was not a slow leak: the Erlang VM inside `srh` sizes its port
@@ -64,7 +67,7 @@ that the kernel or the program enforces per process instead:
   With a sane `nofile` the VM starts at ~60 MB. `data` (RLIMIT_DATA) is the
   backstop for a real leak: allocations past 256 MiB fail, the VM exits, and
   `restart: unless-stopped` starts a fresh one. The image is pinned by digest to
-  the current `latest` (0.0.10, the newest release).
+  the current multi-arch `latest`.
 - **redis** — `--maxmemory 64mb --maxmemory-policy volatile-ttl`. It holds only
   rate-limit keys, all with a TTL.
 - **app** — `NODE_OPTIONS=--max-old-space-size=256` caps the V8 heap.
@@ -83,26 +86,22 @@ The usual redeploy is one command, `scripts/deploy-pi.sh` (light is its
 default; `--full` switches to the full stack). It pulls `origin/main`, rebuilds,
 stops ClamAV when coming from full mode, and waits for `/api/health`.
 
-For anything else, run from the checkout on the Pi, with the same
-`.env.production` as the full stack. Define a shortcut first:
+For anything else, run from the checkout on the Pi. Define a shortcut first:
 
 ```bash
-LIGHT="docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.pi.yml -f docker-compose.pi-light.yml"
-FULL="docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.pi.yml"
+C="docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.pi.yml"
 ```
 
-- **Start / redeploy light:** `$LIGHT up -d --no-build` (add `--build` after a
+- **Start / redeploy light:** `$C up -d --no-build` (add `--build` after a
   `git pull` that changes the app).
-- **Status:** `$LIGHT ps -a`. `clamav` and `scanner` show as exited; that is
-  expected.
-- **Full → light:** `$LIGHT up -d --no-build`, then
-  `$LIGHT --profile scanner stop clamav scanner`.
-- **Light → full:** `$FULL up -d --no-build`. This recreates `app`, `redis` and
-  `srh` without the light settings and starts ClamAV, which needs a few minutes
-  to load its signatures before uploads work. `srh` keeps its `nofile` cap,
-  which lives in `docker-compose.prod.yml`; only the `data` backstop and the
-  digest pin are light-only.
-- **Stop everything (keep data):** `$LIGHT --profile scanner stop`.
+- **Status:** `$C ps -a`. `clamav` and `scanner` show as exited (or are
+  missing on a fresh host); that is expected.
+- **Full → light:** `$C --profile scanner stop clamav scanner`.
+- **Light → full:** `$C --profile scanner up -d --no-build`. This only starts
+  ClamAV and the scanner; ClamAV needs a few minutes to load its signatures
+  before uploads work. Full mode also needs the scanner's TLS certificate
+  ([RPI.md](RPI.md) §4).
+- **Stop everything (keep data):** `$C --profile scanner stop`.
 
 Never use `down -v` or `docker system prune` on this host: the volumes hold the
 data, and other projects share the Docker daemon.
