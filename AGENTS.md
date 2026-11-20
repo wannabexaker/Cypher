@@ -40,9 +40,9 @@ Current phase: **release readiness**. See `docs/ROADMAP.md`. After release integ
 - Tailwind CSS 4, shadcn/ui, Framer Motion, lucide-react
 - Prisma 6, PostgreSQL 16
 - Auth.js v5, Argon2id, Zod
-- S3-compatible private storage: MinIO locally, Cloudflare R2-compatible in production
-- FingerprintJS, Cloudflare Turnstile, Upstash Redis
-- Vercel, pnpm 10, Node 22
+- S3-compatible private storage: MinIO (the `pgsty/minio` fork) locally and in production; the code stays R2-compatible
+- FingerprintJS, Cloudflare Turnstile, Upstash-REST rate limits (production: self-hosted Redis behind the `srh` shim)
+- Self-hosted Docker Compose on a Raspberry Pi behind a Cloudflare Tunnel (`docs/deploy/RPI.md`; light mode, the default there, in `docs/deploy/RPI-LIGHT.md`), pnpm 10, Node 22
 
 Do not replace the stack or introduce another datastore, queue, or auth system without explicit approval.
 
