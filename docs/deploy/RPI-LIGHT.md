@@ -33,7 +33,8 @@ Measured on a Pi 4 (8 GB), process RSS per container, 2026-11-20:
 | **total** | **~450 MB** |
 
 For comparison the full stack used ~3 GB on the same Pi, 1.6 GB of it `srh`
-(see below) and ~1 GB `clamav`.
+(see below; fixed since, the `nofile` cap is now in `docker-compose.prod.yml`
+too) and ~1 GB `clamav`.
 
 ## What a visitor can and cannot do
 
@@ -93,8 +94,9 @@ FULL="docker compose --env-file .env.production -f docker-compose.prod.yml -f do
   `$LIGHT --profile scanner stop clamav scanner`.
 - **Light → full:** `$FULL up -d --no-build`. This recreates `app`, `redis` and
   `srh` without the light settings and starts ClamAV, which needs a few minutes
-  to load its signatures before uploads work. Note that the full files do not
-  carry the `srh` `nofile` fix, so `srh` will grow to ~1.6 GB again.
+  to load its signatures before uploads work. `srh` keeps its `nofile` cap,
+  which lives in `docker-compose.prod.yml`; only the `data` backstop and the
+  digest pin are light-only.
 - **Stop everything (keep data):** `$LIGHT --profile scanner stop`.
 
 Never use `down -v` or `docker system prune` on this host: the volumes hold the

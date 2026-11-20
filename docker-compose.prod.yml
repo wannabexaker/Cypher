@@ -80,6 +80,13 @@ services:
       SRH_MODE: env
       SRH_TOKEN: ${UPSTASH_REDIS_REST_TOKEN}
       SRH_CONNECTION_STRING: "redis://redis:6379"
+    # The Erlang VM inside srh sizes its port table from the open-files limit.
+    # Docker's default (~1 billion on the Pi) made it allocate ~1.6 GB at boot;
+    # 16384 is plenty for one Redis connection plus the app's requests (~60 MB).
+    ulimits:
+      nofile:
+        soft: 16384
+        hard: 16384
     depends_on:
       redis:
         condition: service_healthy
