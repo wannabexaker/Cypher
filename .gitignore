@@ -40,6 +40,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# nightly backups written by the `backup` service (docker-compose.prod.yml)
+/backups/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

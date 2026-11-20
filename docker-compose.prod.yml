@@ -187,6 +187,30 @@ services:
       app:
         condition: service_started
 
+  # ── Nightly backup (database dump + MinIO volume, see deploy/backup) ───────
+  # 03:30 UTC, after the purge, into ${BACKUP_DIR} (default ./backups next to
+  # this file, git-ignored). Keeps the newest BACKUP_KEEP_DAILY (14) days and,
+  # when BACKUP_KEEP_MONTHLY > 0, that many first-of-month copies. Files are
+  # 0600; set BACKUP_OWNER=uid:gid to hand them to the host user.
+  backup:
+    build:
+      context: ./deploy/backup
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-14}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-0}
+      BACKUP_OWNER: ${BACKUP_OWNER:-}
+    volumes:
+      - cypher_minio_data:/minio:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   # ── Edge (Cloudflare Tunnel — public HTTPS, no port-forwarding) ────────────
   # Single-box mode only: start with `--profile edge`. On a host that already
   # runs cloudflared (sharing a tunnel with other projects), OMIT the profile

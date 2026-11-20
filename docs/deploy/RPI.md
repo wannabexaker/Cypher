@@ -5,7 +5,7 @@ internet through a **Cloudflare Tunnel** (no port-forwarding, home IP hidden).
 
 **Stack:** `app` (Next.js standalone) · `postgres` · `minio` (private) ·
 `redis` + `srh` (Upstash-REST-compatible rate limits) · `clamav` + `scanner`
-(malware) · `migrate` (one-shot) · `cron` · `cloudflared`.
+(malware) · `migrate` (one-shot) · `cron` · `backup` · `cloudflared`.
 
 > On a shared Pi with no real traffic, run **light mode** instead: same site,
 > ClamAV off, file uploads refused, ~450 MB instead of ~3 GB. See
@@ -116,12 +116,60 @@ docker compose --env-file .env.production -f docker-compose.prod.yml logs -f app
 
 - **Update / redeploy:** `scripts/deploy-pi.sh` (light mode, the default on the shared Pi) or `scripts/deploy-pi.sh --full`. It resets the checkout to `origin/main`, rebuilds, starts the stack, waits for `/api/health` and prints the deployed version. `migrate` applies any new migrations automatically.
 - **Logs:** `docker compose --env-file .env.production -f docker-compose.prod.yml logs -f <service>`.
-- **Backups:** the state lives in named volumes `cypher_pg_data` + `cypher_minio_data`. Back them up, e.g.:
-  ```bash
-  docker run --rm -v cypher_pg_data:/v -v "$PWD":/b alpine tar czf /b/pg-backup.tgz -C /v .
-  ```
+- **Backups:** see [Backups](#backups) below.
 - **Timezone:** cron runs in **UTC** (matches the original schedule). Adjust the times in `deploy/cron/entrypoint.sh` if you want local-time runs.
 - **Large uploads + ClamAV:** clamd's default `StreamMaxLength` is 25MB. For bigger audio files, raise it (and `MaxScanSize`) in the clamav container's `/etc/clamav/clamd.conf` and restart `clamav`; otherwise large files fail-closed (blocked, never served unscanned).
+
+### Backups
+
+The state lives in two named volumes, `cypher_cypher_pg_data` and
+`cypher_cypher_minio_data` (compose prefixes the project name). The `backup`
+service (`deploy/backup`) saves both every night at 03:30 UTC, after the purge:
+
+```
+backups/daily/cypher-db-YYYY-MM-DD.sql.gz      pg_dump, restorable over the live DB
+backups/daily/cypher-media-YYYY-MM-DD.tar.gz   the whole MinIO data directory
+backups/monthly/...                           first-of-month copies, off by default
+backups/LAST_OK                               UTC time of the last good run
+```
+
+`backups/` sits next to the compose files and is git-ignored. Optional settings
+in `.env.production`: `BACKUP_DIR` (another host folder, e.g. an external
+drive), `BACKUP_KEEP_DAILY` (14), `BACKUP_KEEP_MONTHLY` (0) and `BACKUP_OWNER`
+(`uid:gid` that should own the files; otherwise root, mode 0600). The Privacy
+page promises that rooms disappear after 15 days of inactivity, so think about
+that page before keeping copies for longer. A backup on the same SD card does
+not survive the card; copy the folder off the Pi if that matters.
+
+Run one now, and check the last run:
+
+```bash
+C="docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.pi.yml"
+$C exec backup backup.sh
+cat backups/LAST_OK
+```
+
+**Restore the database** (the dump drops and recreates every table, so it
+replaces what is there):
+
+```bash
+$C stop app cron
+gunzip -c backups/daily/cypher-db-YYYY-MM-DD.sql.gz | \
+  $C exec -T postgres sh -c 'psql -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+$C start app cron
+```
+
+**Restore the media** (replaces the whole volume):
+
+```bash
+$C stop minio
+docker run --rm -v cypher_cypher_minio_data:/data -v "$PWD/backups/daily":/b:ro alpine \
+  sh -c 'find /data -mindepth 1 -delete && tar -xzf /b/cypher-media-YYYY-MM-DD.tar.gz -C /data'
+$C start minio
+```
+
+Both restores were tested end to end on a throwaway stack (a changed row came
+back, a stored object was readable again and the bucket stayed private).
 
 ## 8. Security notes
 

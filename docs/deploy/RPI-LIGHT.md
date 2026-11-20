@@ -17,6 +17,7 @@ back to full is one command.
 | `app`, `postgres`, `minio` | on | the site itself, its data and its media |
 | `redis` + `srh` | on | rate limits; sign-in, sign-up, joining and voting fail closed without them |
 | `cron` | on | nightly purge + orphan cleanup, ~1 MB |
+| `backup` | on | nightly DB dump + media copy at 03:30 UTC ([RPI.md](RPI.md#backups)) |
 | `migrate`, `createbuckets` | one-shot | run on `up`, then exit |
 | `clamav` + `scanner` | **off** | ~1 GB; moved to the `scanner` profile |
 
