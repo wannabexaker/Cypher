@@ -64,7 +64,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` delivered on the current develo
 - [x] All committed Prisma migrations are applied; the `migrate` service runs them on every deploy.
 - [x] Both scheduled jobs run from the `cron` container: room retention at 03:00 UTC and media maintenance at 03:15 UTC, with liveness rows in `cron_runs`.
 - [x] Production smoke on the live site (there is no separate staging): host registration, room creation, submission and moderation, contest, W/L vote, and finalize.
-- [ ] Light-mode smoke with a real account, including the refused file upload.
+- [~] Light-mode smoke with a real account, including the refused file upload: passed on a local copy of the light stack (2026-11-21, see `docs/deploy/RPI-LIGHT.md`); repeat on the Pi after the next deploy.
 - [ ] Confirm production logs/alerts for auth failures, rate-limit outages, scanner outages, cron failures, and storage errors.
 
 ## P1 — Next product work

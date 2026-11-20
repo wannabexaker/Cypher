@@ -46,9 +46,17 @@ For comparison the full stack used ~3 GB on the same Pi, 1.6 GB of it `srh`
   request to `MALWARE_SCAN_URL` fails; in production it treats the scan as
   unavailable and answers the submission with **503 "File security scanning is
   temporarily unavailable"** (a unit test pins this). This is
-  fail-closed: the file stays in `media/staging/`, is never promoted to
-  `media/final/` and is never served. The nightly `media-maintenance` job
-  deletes such unlinked uploads after `MEDIA_ORPHAN_TTL_HOURS` (default 24 h).
+  fail-closed. The server first copies the upload to an immutable
+  `media/final/` key (the copy it would scan), but the asset stays `PENDING`,
+  is linked to no submission and is never served: the media route only signs
+  `CLEAN` files (423 otherwise). The nightly `media-maintenance` job deletes
+  such unlinked uploads after `MEDIA_ORPHAN_TTL_HOURS` (default 24 h).
+
+Checked end to end on 2026-11-21 against a local copy of this exact stack
+(production build, Turnstile test keys, a proxy in place of the tunnel): sign-up,
+sign-in, room creation, guest join, a YouTube link submission, approval, a
+leaderboard contest and a guest W vote all worked; the file upload was signed
+and stored, then refused with 503.
 
 That is the intended trade-off for a showcase. To accept uploads, switch to full.
 
