@@ -40,7 +40,7 @@ Everything except Turnstile runs as a container in `docker-compose.prod.yml`.
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Turnstile site key, baked in at build time | widget cannot issue a token |
 | `UPSTASH_REDIS_REST_URL` | `http://srh:80` inside the stack | **all rate-limited routes → 503** |
 | `UPSTASH_REDIS_REST_TOKEN` | must equal the `srh` service's `SRH_TOKEN` | (register, login, join, votes, battles, submissions, uploads) |
-| `S3_ENDPOINT` | **public** media origin; the browser fetches presigned URLs from it | storage broken |
+| `S3_ENDPOINT` | the site’s own public origin (one domain; the tunnel sends `/cypher-media/*` to MinIO). The CSP allows only that origin, so a separate media hostname would block uploads | storage broken |
 | `S3_REGION` | e.g. `auto` | " |
 | `S3_BUCKET` | **private** bucket name | " |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | MinIO root credentials | " |
@@ -68,7 +68,7 @@ Everything except Turnstile runs as a container in `docker-compose.prod.yml`.
 
 ## 3. Order
 
-1. Point the public hostname(s) at the tunnel (see [RPI.md](RPI.md) §2 and the
+1. Point the public hostname at the tunnel, `/cypher-media/*` to MinIO first and the rest to the app (see [RPI.md](RPI.md) §2 and the
    ingress comment in `docker-compose.pi.yml`).
 2. Create the Turnstile widget for the production hostname → site key + secret key.
 3. Copy `.env.production.example` to `.env.production` and fill it in. Generate

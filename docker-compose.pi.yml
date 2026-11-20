@@ -40,7 +40,7 @@ services:
 
   minio:
     ports:
-      - "127.0.0.1:9000:9000" # host cloudflared -> media.<domain> (presigned URLs)
+      - "127.0.0.1:9000:9000" # host cloudflared -> cypher.<domain>/cypher-media/* (presigned URLs)
 
   scanner:
     # Fetches presigned download URLs at the public S3_ENDPOINT host.

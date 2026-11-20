@@ -20,9 +20,11 @@ internet through a **Cloudflare Tunnel** (no port-forwarding, home IP hidden).
   curl -fsSL https://get.docker.com | sh
   sudo usermod -aG docker "$USER"   # re-login after this
   ```
-- A **domain on Cloudflare** (free plan is fine). You will use two hostnames:
-  - `cypher.example.com` — the app
-  - `media.example.com` — MinIO (browser fetches presigned media URLs from here)
+- A **domain on Cloudflare** (free plan is fine). One hostname, e.g.
+  `cypher.example.com`, serves both the app and the media: `/cypher-media/*`
+  goes to MinIO, everything else to the app. Do not use a separate media
+  hostname: the Content-Security-Policy only lets the browser upload to the
+  site's own origin.
 - A **Cloudflare Turnstile** widget (free): Dashboard → Turnstile → Add site
   (add `cypher.example.com`) → copy the **site key** + **secret key**.
 
@@ -39,16 +41,18 @@ cp .env.production.example .env.production
 Cloudflare **Zero Trust** dashboard → Networks → **Tunnels** → Create a tunnel
 (type *Cloudflared*) → name it `cypher` → **copy the tunnel token**.
 
-Add two **Public Hostnames** to the tunnel:
+Add two **Public Hostname** routes for the same hostname, the media path first:
 
-| Public hostname | Service |
-|---|---|
-| `cypher.example.com` | `http://app:3000` |
-| `media.example.com` | `http://minio:9000` |
+| Public hostname | Path | Service |
+|---|---|---|
+| `cypher.example.com` | `^/cypher-media/.*` | `http://minio:9000` |
+| `cypher.example.com` | (empty) | `http://app:3000` |
 
 > Leave “HTTP Host Header” blank so the original host is preserved (MinIO needs
-> `Host: media.example.com` to match presigned signatures). Do **not** expose the
-> scanner or the MinIO console.
+> `Host: cypher.example.com` to match presigned signatures). Do **not** expose
+> the scanner or the MinIO console. On a host that already runs `cloudflared`,
+> the same two rules go into its config file instead (see the header of
+> `docker-compose.pi.yml`).
 
 ## 3. Fill `.env.production`
 
@@ -62,8 +66,9 @@ openssl rand -hex 24      # MALWARE_SCAN_TOKEN
 openssl rand -hex 24      # POSTGRES_PASSWORD / S3_SECRET_ACCESS_KEY
 ```
 
-Edit `.env.production` and set: the two domains (`AUTH_URL`/`NEXTAUTH_URL` =
-`https://cypher.example.com`, `S3_ENDPOINT` = `https://media.example.com`), the
+Edit `.env.production` and set: the domain (`AUTH_URL`, `NEXTAUTH_URL` and
+`S3_ENDPOINT` all = `https://cypher.example.com`; keep `S3_BUCKET="cypher-media"`
+to match the tunnel path and `S3_FORCE_PATH_STYLE="true"`), the
 Postgres/MinIO passwords (keep them consistent inside `DATABASE_URL`), the
 Turnstile keys, and `CLOUDFLARE_TUNNEL_TOKEN`. Keep `MALWARE_SCAN_URL`,
 `UPSTASH_REDIS_REST_URL`, and the internal service tokens as templated.
@@ -185,7 +190,8 @@ back, a stored object was readable again and the bucket stayed private).
 
 ## 9. Troubleshooting
 
-- **Media 403 / signature errors:** ensure the tunnel preserves the Host header and `S3_ENDPOINT` host == the media public hostname. If it persists, set `MINIO_SERVER_URL=https://media.example.com` on the `minio` service and restart.
+- **Media 403 / signature errors:** ensure the tunnel preserves the Host header and `S3_ENDPOINT` == the site's public origin. If it persists, set `MINIO_SERVER_URL=https://cypher.example.com` on the `minio` service and restart.
+- **Uploads blocked in the browser console (CSP `connect-src`):** `S3_ENDPOINT` points at a different origin than the site. Use the single-domain routing above.
 - **Uploads always fail:** light mode (the stack was started without `--profile scanner`; that is the intended 503), ClamAV not healthy yet (`docker compose ... ps`), or `MALWARE_SCAN_URL` not `https://scanner:8443`, or the cert CN/SAN isn't `scanner`.
 - **Votes return 503:** the SRH/Redis backend is down, or `UPSTASH_REDIS_REST_TOKEN` ≠ the `srh` `SRH_TOKEN` — they must match.
 - **Login redirect loops:** `AUTH_URL`/`NEXTAUTH_URL` must be the exact public origin and `AUTH_TRUST_HOST=true`.
