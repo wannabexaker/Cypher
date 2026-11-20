@@ -1,6 +1,6 @@
 # Cypher Roadmap
 
-Updated: 2026-06-30
+Updated: 2026-11-21
 
 This file is the source of truth for what is delivered, what is release-blocking, and what comes next. Technical details remain in `docs/plan 1.md`; historical handoff details remain under `docs/codex/`.
 
@@ -58,12 +58,13 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` delivered on the current develo
 ## P0 — Release readiness
 
 - [x] Reconcile operational docs with the implemented codebase.
-- [~] Local `main` now contains the verified post-H23 stability/security line. Remote push/review and CI on `main` remain pending.
-- [ ] Provision production PostgreSQL, private R2-compatible storage, Upstash Redis, Turnstile, and the HTTPS malware-scanner service.
-- [ ] Set production secrets: database URLs, `AUTH_SECRET`, storage credentials, Turnstile, Upstash, scanner token, and `CRON_SECRET`.
-- [ ] Apply all committed Prisma migrations in staging/production.
-- [ ] Verify both Vercel crons: channel retention at 03:00 UTC and media maintenance at 03:15 UTC.
-- [ ] Run a staging smoke: host registration/login, room creation, guest join, file upload/scan, moderation, W/L vote, results, battle, sign-out, and retention authorization.
+- [x] The post-H23 stability/security line is on `main` with green CI, released as `v1.0.0`.
+- [x] Production runs self-hosted on a Raspberry Pi behind a Cloudflare Tunnel: PostgreSQL, private MinIO storage, Redis + `srh` rate limits, Turnstile, and the ClamAV scanner (off in light mode, where file uploads are refused). See `docs/deploy/RPI.md`.
+- [x] Production secrets are set in `.env.production` on the host (names in `docs/deploy/PROVISIONING.md`).
+- [x] All committed Prisma migrations are applied; the `migrate` service runs them on every deploy.
+- [x] Both scheduled jobs run from the `cron` container: room retention at 03:00 UTC and media maintenance at 03:15 UTC, with liveness rows in `cron_runs`.
+- [x] Production smoke on the live site (there is no separate staging): host registration, room creation, submission and moderation, contest, W/L vote, and finalize.
+- [ ] Light-mode smoke with a real account, including the refused file upload.
 - [ ] Confirm production logs/alerts for auth failures, rate-limit outages, scanner outages, cron failures, and storage errors.
 
 ## P1 — Next product work

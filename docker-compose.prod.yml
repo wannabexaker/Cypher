@@ -175,7 +175,7 @@ services:
       retries: 5
       start_period: 40s
 
-  # ── Scheduled jobs (replaces Vercel Cron) ──────────────────────────────────
+  # ── Scheduled jobs (busybox crond, see deploy/cron) ────────────────────────
   cron:
     build:
       context: ./deploy/cron

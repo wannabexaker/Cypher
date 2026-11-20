@@ -11,12 +11,12 @@ export const runtime = "nodejs";
 const CRON_JOB = "purge";
 const AUDIT_ENTITY_TYPE = "cron";
 
-// H14 + H16a: retention sweep. Vercel cron hits this daily with
-// `Authorization: Bearer <CRON_SECRET>`. Channels with no activity for 15+
+// H14 + H16a: retention sweep. The cron container (deploy/cron) hits this
+// daily with `Authorization: Bearer <CRON_SECRET>`. Channels with no activity for 15+
 // days (lastActivityAt < now - 15d) get their MinIO objects wiped first,
 // then the row cascade-deletes the rest. No always-on worker — purely
 // scheduled.
-// H13.1: Vercel Cron Jobs invoke the path with a GET request (not POST), so
+// H13.1: the scheduler invokes the path with a GET request (not POST), so
 // the handler must be exported as GET or the daily sweep would 405.
 export async function GET(request: Request) {
   if (!isCronAuthorized(request)) {

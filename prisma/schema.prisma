@@ -1,5 +1,5 @@
 // Cypher — data model (source of truth)
-// Stack: Next.js 15 + Prisma + PostgreSQL (Neon/Supabase) on Vercel.
+// Stack: Next.js 15 + Prisma + PostgreSQL, self-hosted with Docker Compose.
 // CORE CONCEPT: a Channel is a "room" with a join CODE. A host creates it; whoever enters
 // with the code joins as a member and can upload tracks. Host moderates. Crowd votes. Battles decide.
 // Voting: guest-allowed (fingerprint + IP cap + Turnstile captcha). See docs/plan 1.md §1b, §4, §6.
